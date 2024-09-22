@@ -24,7 +24,9 @@ input group "Indicators"
 input int maPeriodLow = 21;                 // Lower Moving Average Period
 input int maPeriodHigh = 50;                // Higher Moving Average Period
 input ENUM_MA_METHOD maMode = MODE_SMA;     // The Moving Average Method
-
+input int periodRSI = 14;                   // Period for RSI
+input double lowRSI = 25.0;                 // Low RSI indicating over sold
+input double highRSI = 75.0;                 // High RSI indicating over bought
 
 
 // ----------------------------
@@ -42,6 +44,8 @@ int handleMALow;
 double bufferMALow[];
 int handleMAHigh;
 double bufferMAHigh[];
+int handleRSI;
+double bufferRSI[];
 
 
 int OnInit(void)
@@ -53,6 +57,8 @@ int OnInit(void)
     ArraySetAsSeries(bufferMALow, true);
     handleMAHigh = iMA(Symbol(), timeframe, maPeriodHigh, 0, maMode, PRICE_CLOSE);
     ArraySetAsSeries(bufferMAHigh, true);
+    handleRSI = iRSI(Symbol(), timeframe, periodRSI, PRICE_CLOSE);
+    ArraySetAsSeries(bufferRSI, true);
 
     trade.SetExpertMagicNumber(EA_MAGIC);
 
@@ -75,6 +81,7 @@ void OnTick(void)
 
     CopyBuffer(handleMALow, MAIN_LINE, 1, expBars, bufferMALow);
     CopyBuffer(handleMAHigh, MAIN_LINE, 1, expBars, bufferMAHigh);
+    CopyBuffer(handleRSI, MAIN_LINE, 1, expBars, bufferRSI);
     
     MqlDateTime time;
     TimeToStruct(TimeGMT(), time);
@@ -91,7 +98,7 @@ void OnTick(void)
     }
     
     if (BuysTotal() == 0 
-    // && BuyCondition()
+    && BuyCondition()
     )
     {
         double high = pivotHigh();
@@ -101,7 +108,7 @@ void OnTick(void)
         }
     }
     if (SellsTotal() == 0
-    //  && SellCondition()
+     && SellCondition()
      )
     {
         double low = pivotLow();
@@ -170,12 +177,14 @@ bool newBar()
 
 bool BuyCondition()
 {
-    return bufferMALow[0] > bufferMAHigh[0];
+    // return bufferMALow[0] > bufferMAHigh[0];
+    return bufferRSI[nBars] < highRSI; 
 }
 
 bool SellCondition()
 {
-    return bufferMALow[0] < bufferMAHigh[0];
+    // return bufferMALow[0] < bufferMAHigh[0];
+    return bufferRSI[nBars] > lowRSI;
 }
 
 
