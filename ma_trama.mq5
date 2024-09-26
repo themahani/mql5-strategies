@@ -25,16 +25,22 @@ input int periodMA = 100;
 input ENUM_MA_METHOD methodMA = MODE_SMA;
 input ENUM_APPLIED_PRICE appliedPriceMA = PRICE_CLOSE;
 
-input group "Money Management";
-input double Lots = 0.1;
+input group "Trade Management"
+// input double Lots = 0.1;
+input double riskPercent = 2.0;         // Risk as a % of trading capital
 input double profitFactor = 2.0;
-input ulong MAGIC = 3948302840;
+input ulong EA_MAGIC = 3948302840;
+// input int tpPoints = 200;               // Take Profit in Points (10 points = 1 pip)
+input int slPoints = 200;               // Stop Loss in Points (10 points = 1 pip)
+input int tslTriggerPoints = 15;        // Points in profit before trailing SL is activated (10 points = 1 pip)
+input int tslPoints = 10;               // Trailing SL (10 points = 1 pip)
 
-input group "Trendline Breakout Params";
+
+input group "Trendline Breakout Params"
 input int lenBack = 14;
 input double atrMultiplier = 1.0;    // ATR multiplier
 
-input group "Trade Session UTC";
+input group "Trade Session UTC"
 input int startHour = 0;
 input int startMinute = 0;
 input int endHour = 6;
@@ -139,36 +145,6 @@ void UpdateTrendlines(int i)
     }
 }
 
-// Function to create and update trendline objects
-// void PlotTrendlines(const MqlRates &rates[], int i)
-// {
-//     string upper_line_name = "UpperTrendline_" + IntegerToString(i);
-//     string lower_line_name = "LowerTrendline_" + IntegerToString(i);
-
-//     // Plot upper trendline
-//     if(!ObjectFind(0, upper_line_name))
-//     {
-//         ObjectCreate(upper_line_name, OBJ_TREND, 0, rates[i].time, upper, rates[i - 1].time, upper - slope_ph);
-//         ObjectSetInteger(0, upper_line_name, OBJPROP_COLOR, 0, clrTeal);
-//     }
-//     else
-//     {
-//         ObjectMove(0, upper_line_name, 0, rates[i].time, upper);
-//         ObjectMove(0, upper_line_name, 1, rates[i - 1].time, upper - slope_ph);
-//     }
-
-//     // Plot lower trendline
-//     if(!ObjectFind(0, lower_line_name))
-//     {
-//         ObjectCreate(lower_line_name, OBJ_TREND, 0, rates[i].time, lower, rates[i - 1].time, lower + slope_pl);
-//         ObjectSetInteger(0, lower_line_name, OBJPROP_COLOR, 0, clrRed);
-//     }
-//     else
-//     {
-//         ObjectMove(0, lower_line_name, 0, rates[i].time, lower);
-//         ObjectMove(0, lower_line_name, 1, rates[i - 1].time, lower + slope_pl);
-//     }
-// }
 
 bool trendlineBreakUp()
 {
@@ -318,8 +294,8 @@ double _hh, _ll, _tc, prev_TRAMA;
 void calcTRAMA()
 {
     // Calculate hh and ll based on highs and lows over 'length' period
-    double highestHigh = iHigh(NULL, 0, iHighest(NULL, 0, MODE_HIGH, length, length));
-    double lowestLow = iLow(NULL, 0, iLowest(NULL, 0, MODE_LOW, length, length));
+    double highestHigh = iHigh(NULL, 0, iHighest(NULL, 0, MODE_HIGH, length, 1));
+    double lowestLow = iLow(NULL, 0, iLowest(NULL, 0, MODE_LOW, length, 1));
 
     // Calculate changes in highest and lowest values
     _hh = MathMax(Sign(highestHigh - rates[0].high), 0);
@@ -339,6 +315,9 @@ void calcTRAMA()
 }
 
 CTrade trade;
+CPositionInfo pos;
+COrderInfo ord;
+
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -355,7 +334,7 @@ int OnInit(void)
     ArraySetAsSeries(hh, true);
     ArraySetAsSeries(ll, true);
 
-    trade.SetExpertMagicNumber(MAGIC);
+    trade.SetExpertMagicNumber(EA_MAGIC);
 
     return (INIT_SUCCEEDED);
 }
@@ -377,11 +356,11 @@ void OnTick(void)
         // }
         getRates();
         calculateAMA();
-        // calcTRAMA();
+        calcTRAMA();
         
         UpdateTrendlines(lenBack);
 
-        Comment(AMA, "\n", upper, "\n", lower, "\n", ph, "\n", pl);
+        Comment(AMA, "\n", TRAMA, "\n", lower, "\n", ph, "\n", pl);
 
         if (PositionsTotal() == 0 && TradeSession())
         {
@@ -409,20 +388,26 @@ bool newBar()
     return false;
 }
 
+int nBars = 3;
+
 void Buy(int numBars)
 {
     double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    double sl = rates[0].close;
-    for (int i = 0; i < numBars; i++)
-    {
-        sl = MathMin(sl, rates[i].close);
-    }
+    // double sl = rates[0].close;
+    // double sl = iLow(Symbol(), PERIOD_CURRENT, iLowest(Symbol(), PERIOD_CURRENT, MODE_LOW, nBars, 1));
+    double sl = ask - slPoints * _Point;
+
+    // for (int i = 0; i < numBars; i++)
+    // {
+    //     sl = MathMin(sl, rates[i].close);
+    // }
     // sl = MathMin(sl, AMA);
     double diff = MathAbs(ask - sl);
-    sl -= diff * 1.2;
+    // sl -= diff * 1.2;
     double tp = ask + profitFactor * diff;
+    double lots = calculateLots(MathAbs(ask - sl));
 
-    if(!trade.Buy(Lots, _Symbol, ask, sl, tp, StringFormat("SL=%d, TP=%d", sl, tp)))
+    if(!trade.Buy(lots, _Symbol, ask, sl, tp, StringFormat("SL=%d, TP=%d", sl, tp)))
     {
         Print("Failed to Sell! Error: ", GetLastError());
     }
@@ -431,18 +416,78 @@ void Buy(int numBars)
 void Sell(int numBars)
 {
     double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double sl = rates[0].close;
-    for (int i = 0; i < numBars; i++)
-    {
-        sl = MathMax(sl, rates[i].close);
-    }
+    // double sl = rates[0].close;
+    // double sl = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, nBars, 1));
+    double sl = bid - slPoints * _Point;
+
+    // for (int i = 0; i < numBars; i++)
+    // {
+    //     sl = MathMax(sl, rates[i].close);
+    // }
     // sl = MathMax(sl, AMA);
     double diff = MathAbs(bid - sl);
-    sl += diff * 1.2;
+    // sl += diff * 1.2;
     double tp = bid - profitFactor * diff;
+    double lots = calculateLots(MathAbs(sl - bid));
 
-    if(!trade.Sell(Lots, _Symbol, bid, sl, tp, StringFormat("SL=%d, TP=%d", sl, tp)))
+    if(!trade.Sell(lots, _Symbol, bid, sl, tp, StringFormat("SL=%d, TP=%d", sl, tp)))
     {
         Print("Failed to Sell! Error: ", GetLastError());
     }
+}
+
+void TrailStop()
+{
+    double sl = 0;
+    double tp = 0;
+
+    double ask = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
+    double bid = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+
+    for (int i = PositionsTotal()-1; i >= 0; i--)
+    {
+        // Select Position
+        if (!pos.SelectByIndex(i))  continue;
+        ulong ticket = pos.Ticket();
+
+        if (pos.PositionType() == POSITION_TYPE_BUY && pos.Symbol() == Symbol() && pos.Magic() == EA_MAGIC)
+        {
+            if (MathAbs(bid - pos.PriceOpen()) > tslPoints * _Point) // If TSL is triggered
+            {
+                tp = pos.TakeProfit();
+                sl = bid - (tslPoints * _Point);
+                if (sl > pos.StopLoss() && sl != 0) trade.PositionModify(ticket, sl, tp);
+            }
+        }
+        else if (pos.PositionType() == POSITION_TYPE_SELL && pos.Symbol() == Symbol() && pos.Magic() == EA_MAGIC)
+        {
+            if (MathAbs(ask - pos.PriceOpen()) > tslPoints * _Point) // If TSL is triggered
+            {
+                tp = pos.TakeProfit();
+                sl = ask + (tslPoints * _Point);
+                if (sl < pos.StopLoss() && sl != 0) trade.PositionModify(ticket, sl, tp);
+            }
+        }
+    }    
+}
+
+double calculateLots(double slDiff)
+{
+    double risk = AccountInfoDouble(ACCOUNT_BALANCE) * riskPercent / 100.0;
+    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+    double lotstep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+    double minVolume = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MIN);
+    double maxVolume = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MAX);
+    double volumeLimit = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_LIMIT);
+
+
+    double moneyPerLotstep = slDiff / tickSize * tickValue * lotstep;
+    double lots = MathFloor(risk * moneyPerLotstep) * lotstep;
+    if (volumeLimit != 0)   lots = MathMin(lots, volumeLimit);
+    if (maxVolume != 0)     lots = MathMin(lots, maxVolume);
+    if (minVolume != 0)     lots = MathMax(lots, minVolume);
+    lots = NormalizeDouble(lots, 2);
+
+    return lots;
 }
