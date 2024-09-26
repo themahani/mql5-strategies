@@ -12,7 +12,7 @@ input ENUM_TIMEFRAMES periodHigher = PERIOD_H4;
 input double b2wRatio = 0.70;
 // FVG top - bottom ratio to the body for FVG detection.
 input double fvg2bRatio = 0.50;
-
+input int fvgLen = 100;     // No. of bars to extend the FVG block
 // input int pivotLen = 10;
 // input double ratio = 0.50;
 
@@ -29,10 +29,10 @@ MqlRates rates[];
 MqlRates ratesHigher[];
 int lenBack = 99;
 
-
 // Trade
 CTrade trade;
-
+CPositionInfo pos;
+COrderInfo ord;
 
 enum ENUM_FVG_TYPE 
 {
@@ -48,10 +48,45 @@ struct FVG
     double high;
     double low;
     ENUM_FVG_TYPE type;
+    FVG copy()
+    {
+        FVG copied;
+        copied.top = top;
+        copied.bottom = bottom;
+        copied.high = high;
+        copied.low = low;
+        return copied;
+    }
 };
 
 FVG fvgCurrent = {0.0, 0.0, 0., 0., FVG_NULL};
 FVG fvgHigher = {0.0, 0.0, 0., 0., FVG_NULL};
+FVG fvgSeries[99];
+
+/*
+Update the values and shift to left.
+Since the data is set as timeseries, the newest bar is index zero,
+so we use that for our new value and shift the previous data to the left.
+*/
+void updateSeriesFVG(FVG &arr[], FVG &newValue)
+{
+    int size = ArraySize(arr);
+    for (int i = size-2; i >=0; i--)
+    {
+        arr[i+1] = arr[i];
+    }
+    arr[0] = newValue;
+}
+
+void initializeArrayFVG(FVG &arr[], int len)
+{
+    for (int i = 0; i < len; i++)
+    {
+        FVG element = {0., 0., 0., 0., FVG_NULL};
+        arr[i] = element;
+    }
+}
+
 
 bool isBullish(MqlRates &candle)
 {
@@ -87,13 +122,15 @@ bool bullishFVG(MqlRates &candles[], FVG &fvg)
         fvg.high = candles[1].high;
         fvg.low = candles[1].low;
         fvg.type = FVG_BULLISH;
+        updateSeriesFVG(fvgSeries, fvg.copy());
         datetime start = TimeCurrent();
         datetime end = start + 3600;
-        DrawBox("Bullish FVG", start, bottom, end, top, clrGreen);
+        DrawBox("Bullish FVG", fvg, fvgLen);
         return true;
     }
     return false;
 }
+
 
 bool bearishFVG(MqlRates &candles[], FVG &fvg)
 {
@@ -109,9 +146,10 @@ bool bearishFVG(MqlRates &candles[], FVG &fvg)
         fvg.high = candles[1].high;
         fvg.low = candles[1].low;
         fvg.type = FVG_BEARISH;
+        updateSeriesFVG(fvgSeries, fvg.copy());
         datetime start = TimeCurrent();
         datetime end = start + 3600;
-        DrawBox("Bullish FVG", start, bottom, end, top, clrRed);
+        DrawBox("Bearish FVG", fvg, fvgLen);
     }
     return false;
 }
@@ -120,15 +158,21 @@ void updateFVG()
 {
     bearishFVG(rates, fvgCurrent);
     bullishFVG(rates, fvgCurrent);
-    bearishFVG(ratesHigher, fvgHigher);
-    bullishFVG(ratesHigher, fvgHigher);
+    // bearishFVG(ratesHigher, fvgHigher);
+    // bullishFVG(ratesHigher, fvgHigher);
 }
 
 // Function to draw a green box on the chart
-void DrawBox(string name, datetime time1, double price1, datetime time2, double price2, color clr)
+void DrawBox(string name, FVG &fvg, int nBars)
 {
+    double clr = clrGreen;
+    if (fvg.type == FVG_BEARISH)    clr = clrRed;
+
+    datetime time1 = TimeCurrent() - 2 * PeriodSeconds(Period());
+    datetime time2 = time1 + nBars * PeriodSeconds(Period());
+
     // Create the rectangle object
-    if(!ObjectCreate(0, name, OBJ_RECTANGLE, 0, time1, price1, time2, price2))
+    if(!ObjectCreate(0, name, OBJ_RECTANGLE, 0, time1, fvg.bottom, time2, fvg.top))
     {
         Print("Error creating rectangle: ", GetLastError());
         return;
@@ -237,6 +281,10 @@ int OnInit(void)
     Print(Symbol(), PERIOD_CURRENT);
     ArraySetAsSeries(rates, true);
     ArraySetAsSeries(ratesHigher, true);
+
+    initializeArrayFVG(fvgSeries, lenBack);
+    ArraySetAsSeries(fvgSeries, true);
+
     // ArraySetAsSeries(ph, true);
     // ArraySetAsSeries(pl, true);
 
@@ -257,26 +305,26 @@ void OnDeinit(const int reason)
 
 void OnTick(void)
 {
-    if (newBar())
-    {
-        CopyRates(Symbol(), PERIOD_CURRENT, 1, lenBack, rates);
-        CopyRates(Symbol(), periodHigher, 1, lenBack, ratesHigher);
-        // CopyBuffer(handleRSI, MAIN_LINE, 1, lenBack, bufferRSI);
-        // CopyBuffer(handleMA, MAIN_LINE, 1, lenBack, bufferMA);
-        updateFVG();
-        // updatePivot();
-        Comment(fvgCurrent.top, "\n", fvgCurrent.bottom, "\n", fvgCurrent.type, "\n", rates[0].close);
+    if (!newBar())  return;
+    
+    CopyRates(Symbol(), PERIOD_CURRENT, 1, lenBack, rates);
+    CopyRates(Symbol(), periodHigher, 1, lenBack, ratesHigher);
+    // CopyBuffer(handleRSI, MAIN_LINE, 1, lenBack, bufferRSI);
+    // CopyBuffer(handleMA, MAIN_LINE, 1, lenBack, bufferMA);
+    updateFVG();
+    // updatePivot();
+    Comment(fvgCurrent.top, "\n", fvgCurrent.bottom, "\n", fvgCurrent.type, "\n", rates[0].close);
 
-        if (PositionsTotal() == 0)
+    if (PositionsTotal() == 0)
+    {
+        if (BuyCondition())
         {
-            if (BuyCondition())
-            {
-                Buy();
-            }
-            else if (SellCondition())
-            {
-                Sell();
-            }
+            // Buy();
+        }
+        else if (SellCondition())
+        {
+            // Sell();
         }
     }
+
 }
