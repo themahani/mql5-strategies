@@ -1,18 +1,17 @@
 
 //---
-#include <Trade\AccountInfo.mqh>
-#include <Trade\PositionInfo.mqh>
-#include <Trade\SymbolInfo.mqh>
-#include <Trade\Trade.mqh>
+#include <Trade/AccountInfo.mqh>
+#include <Trade/PositionInfo.mqh>
+#include <Trade/SymbolInfo.mqh>
+#include <Trade/Trade.mqh>
 //---
 
 input group "Data Analysis";
-input ENUM_TIMEFRAMES periodHigher = PERIOD_H4;
 input double b2wRatio = 0.70;   // Body to Wick ratio to consider for FVG detection.
 input double fvg2bRatio = 0.50; // FVG top - bottom ratio to the body for FVG detection.
+
+input group "Visualization"
 input int fvgLen = 100;     // No. of bars to extend the FVG block
-// input int pivotLen = 10;
-// input double ratio = 0.50;
 input int boxExpBars = 500;         // # of bars to keep the boxes (then they are deleted)
 
 
@@ -23,6 +22,20 @@ input double profitFactor = 2.0;        // Profit factor to calculate TP
 input ulong EA_MAGIC = 583093450;       // EA Magic ID
 input string tradeComment = "Scalping Robot";   // Trade Comment
 input int expBars = 100;                // # of bars to expire orders
+input int tslTriggerPoints = 50;        // Points in profit before trailing SL is activated (10 points = 1 pip)
+input int tslPoints = 50;               // Trailing SL (10 points = 1 pip)
+
+input group "Indicators"
+input int periodRSI = 14;                           // RSI period
+input ENUM_TIMEFRAMES timeframeHigher = PERIOD_H4;  // Higher timeframe for EMA
+input int periodMAHigher = 14;                      // EMA period for the higher timeframe
+
+input group "Trade Session UTC"
+input int startHour = 0;
+input int startMinute = 0;
+input int endHour = 6;
+input int endMinute = 0;
+
 
 
 // ---
@@ -34,6 +47,12 @@ ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT;
 MqlRates rates[];
 MqlRates ratesHigher[];
 int lenBack = 99;
+
+// --- Indicators
+int handleRSI;
+double bufferRSI[];
+int handleEMA;
+double bufferEMA[];
 
 // Trade
 CTrade trade;
@@ -281,14 +300,32 @@ bool newBar()
     return false;
 }
 
+bool TradeSession()
+{
+    MqlDateTime tm = {};
+    datetime current = TimeGMT(tm);
+    int startMins = startHour * 60 + startMinute;
+    int endMins = endHour * 60 + endMinute;
+
+    int currentMins = tm.hour * 60 + tm.min;
+
+    return (currentMins >= startMins && currentMins <= endMins);
+}
+
 bool BuyCondition()
 {
     if (fvgSeries[0].type == FVG_BULLISH 
     && fvgSeries[1].type == FVG_BULLISH
     && fvgSeries[0].top > fvgSeries[1].top)
     {
-        double price = rates[0].close;
-        if (price < fvgSeries[0].top && price > fvgSeries[0].bottom)
+        // if (iClose(_Symbol, timeframeHigher, 0) > bufferEMA[0])
+        if (bufferRSI[0] < 70)  // Not over bought
+            return true;
+        double close = rates[0].close;
+        double low = rates[0].low;
+
+        if ((close < fvgSeries[0].top && close > fvgSeries[0].bottom)
+            || (low < fvgSeries[0].top && low > fvgSeries[0].bottom))
         {
             return true;
         }
@@ -303,8 +340,14 @@ bool SellCondition()
     && fvgSeries[1].type == FVG_BEARISH
     && fvgSeries[0].bottom < fvgSeries[1].bottom)
     {
-        double price = rates[0].close;
-        if (price < fvgSeries[0].top && price > fvgSeries[0].bottom)
+        // if (iClose(_Symbol, timeframeHigher, 0) < bufferEMA[0])
+        if (bufferRSI[0] > 30)  // Not over sold
+            return true;
+        double close = rates[0].close;
+        double high = rates[0].high;
+
+        if ((close < fvgSeries[0].top && close > fvgSeries[0].bottom)
+            || (high < fvgSeries[0].top && high > fvgSeries[0].bottom))
         {
             return true;
         }
@@ -374,8 +417,8 @@ void Buy(double entry)
     if (riskPercent > 0)    lots = calculateLots(slDiff);
 
     datetime expiration = iTime(_Symbol, timeframe, 0) + expBars * PeriodSeconds(timeframe);
-
-    trade.BuyStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration, tradeComment);
+    if (entry > ask)   trade.BuyStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration, tradeComment);
+    else    trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration, tradeComment);
 }
 
 void Sell(double entry)
@@ -391,8 +434,8 @@ void Sell(double entry)
     if (riskPercent > 0)    lots = calculateLots(sl - entry);
 
     datetime expiration = iTime(_Symbol, timeframe, 0) + expBars * PeriodSeconds(timeframe);
-
-    trade.SellStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration, tradeComment);
+    if (entry < bid)    trade.SellStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration, tradeComment);
+    else    trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration, tradeComment);
 }
 
 void CloseAllOrders()
@@ -440,6 +483,41 @@ int SellsTotal()
     return sells;
 }
 
+void TrailStop()
+{
+    double sl = 0;
+    double tp = 0;
+
+    double ask = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
+    double bid = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+
+    for (int i = PositionsTotal()-1; i >= 0; i--)
+    {
+        // Select Position
+        if (!pos.SelectByIndex(i))  continue;
+        ulong ticket = pos.Ticket();
+
+        if (pos.PositionType() == POSITION_TYPE_BUY && pos.Symbol() == Symbol() && pos.Magic() == EA_MAGIC)
+        {
+            if (MathAbs(bid - pos.PriceOpen()) > tslPoints * _Point) // If TSL is triggered
+            {
+                tp = pos.TakeProfit();
+                sl = bid - (tslPoints * _Point);
+                if (sl > pos.StopLoss() && sl != 0) trade.PositionModify(ticket, sl, tp);
+            }
+        }
+        else if (pos.PositionType() == POSITION_TYPE_SELL && pos.Symbol() == Symbol() && pos.Magic() == EA_MAGIC)
+        {
+            if (MathAbs(ask - pos.PriceOpen()) > tslPoints * _Point) // If TSL is triggered
+            {
+                tp = pos.TakeProfit();
+                sl = ask + (tslPoints * _Point);
+                if (sl < pos.StopLoss() && sl != 0) trade.PositionModify(ticket, sl, tp);
+            }
+        }
+    }    
+}
+
 
 int OnInit(void)
 {
@@ -453,13 +531,12 @@ int OnInit(void)
     initializeArrayBox(boxes, lenBack);
     ArraySetAsSeries(boxes, true);
 
-    // ArraySetAsSeries(ph, true);
-    // ArraySetAsSeries(pl, true);
-
-    // handleRSI = iRSI(Symbol(), Period(), 14, PRICE_CLOSE);
-    // ArraySetAsSeries(bufferRSI, true);
-    // handleMA = iMA(Symbol(), periodHigher, 50, 0, MODE_SMA, PRICE_CLOSE);
-    // ArraySetAsSeries(bufferMA, true);
+    trade.SetExpertMagicNumber(EA_MAGIC);
+    
+    handleRSI = iRSI(Symbol(), Period(), periodRSI, PRICE_CLOSE);
+    ArraySetAsSeries(bufferRSI, true);
+    handleEMA = iMA(Symbol(), timeframeHigher, periodMAHigher, 0, MODE_EMA, PRICE_CLOSE);
+    ArraySetAsSeries(bufferEMA, true);
 
 
     return INIT_SUCCEEDED;
@@ -474,18 +551,21 @@ void OnDeinit(const int reason)
 void OnTick(void)
 {
 
+    TrailStop();
     if (!newBar())  return;
     
     CopyRates(Symbol(), PERIOD_CURRENT, 1, lenBack, rates);
-    CopyRates(Symbol(), periodHigher, 1, lenBack, ratesHigher);
+    CopyBuffer(handleRSI, MAIN_LINE, 1, 10, bufferRSI);
+    CopyBuffer(handleEMA, MAIN_LINE, 1, lenBack, bufferEMA);
     // CopyBuffer(handleRSI, MAIN_LINE, 1, lenBack, bufferRSI);
-    // CopyBuffer(handleMA, MAIN_LINE, 1, lenBack, bufferMA);
+
     updateFVG();
     updateBoxes();
     // updatePivot();
-    Comment(fvgSeries[0].top, "\n", fvgSeries[0].bottom, "\n", fvgSeries[0].type, "\n");
+    Comment(fvgSeries[0].top, "\n", fvgSeries[0].bottom, "\n", fvgSeries[0].type, "\n",
+    rates[0].close);
 
-    if (PositionsTotal() == 0)
+    if (PositionsTotal() == 0 && TradeSession())
     {
         if (BuyCondition() && BuysTotal() == 0)
         {
@@ -500,3 +580,4 @@ void OnTick(void)
     }
 
 }
+

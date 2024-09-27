@@ -13,10 +13,10 @@
 
 #define MACD_MAGIC 1234502
 //---
-#include <Trade\AccountInfo.mqh>
-#include <Trade\PositionInfo.mqh>
-#include <Trade\SymbolInfo.mqh>
-#include <Trade\Trade.mqh>
+#include <Trade/AccountInfo.mqh>
+#include <Trade/PositionInfo.mqh>
+#include <Trade/SymbolInfo.mqh>
+#include <Trade/Trade.mqh>
 //---
 
 input group "iMA Params"
