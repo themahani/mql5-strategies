@@ -194,3 +194,22 @@ Box DrawBox(FVG &fvg, int nBars)
     return newBox;
 }
 
+double PivotHigh(int loopBack)
+{
+    double highest = 0;
+    int count = 2 * loopBack + 1;
+    int highestIndex = iHighest(NULL, 0, MODE_HIGH, count, 0);
+    if (highestIndex == (loopBack + 1))
+        highest = iHigh(NULL, 0, highestIndex);
+    return highest;
+}
+
+double PivotLow(int loopBack)
+{
+    double lowest = 0;
+    int count = 2 * loopBack + 1;
+    int highestIndex = iLowest(NULL, 0, MODE_LOW, count, 0);
+    if (highestIndex == (loopBack + 1))
+        lowest = iLow(NULL, 0, highestIndex);
+    return lowest;
+}

@@ -25,8 +25,8 @@ input ENUM_MA_METHOD methodMA = MODE_SMA;
 input ENUM_APPLIED_PRICE appliedPriceMA = PRICE_CLOSE;
 
 input group "Trade Management"
-    // input double Lots = 0.1;
-    input double riskPercent = 2.0; // Risk as a % of trading capital
+// input double Lots = 0.1;
+input double riskPercent = 2.0; // Risk as a % of trading capital
 input double profitFactor = 2.0;
 input ulong EA_MAGIC = 3948302840; // EA Magic ID
 // input int tpPoints = 200;               // Take Profit in Points (10 points = 1 pip)
@@ -36,7 +36,8 @@ input int tslPoints = 10;        // Trailing SL (10 points = 1 pip)
 input int barsLimitOrder = 4;    // Bars to look forward to for limit order
 input int expBars = 100;         // # of bars after which the orders expire
 
-input group "Trendline Breakout Params" input int lenBack = 14; // # of bars to look around for pivots detection
+input group "Trendline Breakout Params"
+input int lenBack = 14;                 // # of bars to look around for pivots detection
 input double atrMultiplier = 1.0;                               // ATR multiplier
 
 input group "Trade Session UTC" input int startHour = 0;
@@ -222,12 +223,6 @@ double Highest(MqlRates &rates[])
     int size = ArraySize(rates);
     double highestValue = 0.;
     highestValue = iHigh(NULL, 0, iHighest(NULL, 0, MODE_HIGH, size, 1));
-    // for (int i = size - 1; i >= 0; i--)
-    // {
-    //     if (rates[i].high > highestValue)
-    //         highestValue = rates[i].high;
-    // }
-    // Push the new data point to array
     highestArray[0] = highestArray[1];
     highestArray[1] = highestValue;
     return highestValue;
@@ -238,12 +233,6 @@ double Lowest(MqlRates &rates[])
     int size = ArraySize(rates);
     double lowestValue = DBL_MAX;
     lowestValue = iLow(NULL, 0, iLowest(NULL, 0, MODE_LOW, size, 1));
-    // for (int i = size - 1; i >= 0; i--)
-    // {
-    //     if (rates[i].low > lowestValue)
-    //         lowestValue = rates[i].low;
-    // }
-    // Push the new data point to array
     lowestArray[0] = lowestArray[1];
     lowestArray[1] = lowestValue;
     return lowestValue;
