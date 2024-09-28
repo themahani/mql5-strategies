@@ -11,6 +11,7 @@ input group "Date Analysis"
 input int lenBack = 5;      // Bars to look around for Pivot Detection
 input double w2bRatio = 2.0;       // Minimum ratio of wick to body for RB detection
 input int minWickPoints = 50;       // Minimum size of wick in Points (10 pts = 1 pip)
+
 input group "Trade Management"
 input double riskPercent = 2.0; // Risk as a % of trading capital
 input double profitFactor = 2.0;
@@ -19,7 +20,6 @@ input ulong EA_MAGIC = 3948302840; // EA Magic ID
 input int slPoints = 200;        // Stop Loss in Points (10 points = 1 pip)
 input int tslTriggerPoints = 15; // Points in profit before trailing SL is activated (10 points = 1 pip)
 input int tslPoints = 10;        // Trailing SL (10 points = 1 pip)
-input int barsLimitOrder = 4;    // Bars to look forward to for limit order
 input int expBars = 100;         // # of bars after which the orders expire
 input bool trailStop = true;     // Use Trailing SL?
 

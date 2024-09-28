@@ -37,8 +37,7 @@ void BuyLimit(CTrade &trade, double entry, int slPoints, double profitFactor, do
     if (riskPercent > 0)    lots = calculateLots(slDiff, riskPercent);
 
     datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
-    if (entry > ask)   trade.BuyStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration);
-    else    trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration);
+    trade.BuyStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration);
 }
 
 void SellLimit(CTrade &trade, double entry, int slPoints, double profitFactor, double riskPercent, int expBars)
@@ -53,8 +52,7 @@ void SellLimit(CTrade &trade, double entry, int slPoints, double profitFactor, d
     if (riskPercent > 0)    lots = calculateLots(slDiff, riskPercent);
 
     datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
-    if (entry < bid)    trade.SellStop(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration);
-    else    trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration);
+    trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration);
 }
 
 void TrailStop(CPositionInfo &pos, CTrade &trade, const ulong EA_MAGIC, int tslTriggerPoints, int tslPoints)
