@@ -157,6 +157,7 @@ bool bearishFVG(MqlRates &candles[], FVG &fvg, double fvg2bRatio, double b2wRati
         fvg.low = candles[1].low;
         fvg.time = candles[1].time;
         fvg.type = FVG_BEARISH;
+        return true;
     }
     return false;
 }

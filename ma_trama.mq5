@@ -56,9 +56,9 @@ double AMA = 0.0;
 MqlRates rates[];
 double highestArray[2];
 double lowestArray[2];
-double hh[99];
-double ll[99];
-int trends[99];
+double hh[];
+double ll[];
+int trends[];
 
 int numOfBars = 0;
 
@@ -218,9 +218,9 @@ void getRates()
         Print("Couldn't fetch data. Error: ", GetLastError());
 }
 
-double Highest(MqlRates &rates[])
+double Highest(MqlRates &candles[])
 {
-    int size = ArraySize(rates);
+    int size = ArraySize(candles);
     double highestValue = 0.;
     highestValue = iHigh(NULL, 0, iHighest(NULL, 0, MODE_HIGH, size, 1));
     highestArray[0] = highestArray[1];
@@ -228,9 +228,9 @@ double Highest(MqlRates &rates[])
     return highestValue;
 }
 
-double Lowest(MqlRates &rates[])
+double Lowest(MqlRates &candles[])
 {
-    int size = ArraySize(rates);
+    int size = ArraySize(candles);
     double lowestValue = DBL_MAX;
     lowestValue = iLow(NULL, 0, iLowest(NULL, 0, MODE_LOW, size, 1));
     lowestArray[0] = lowestArray[1];
@@ -347,8 +347,9 @@ int OnInit(void)
 
     // TRAMA
     ArraySetAsSeries(rates, true);
-    initializeArray(hh, length);
-    initializeArray(ll, length);
+    ArrayResize(hh, length);
+    ArrayResize(ll, length);
+    ArrayResize(trends, length);
     ArraySetAsSeries(hh, true);
     ArraySetAsSeries(ll, true);
 

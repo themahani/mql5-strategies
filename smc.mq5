@@ -55,10 +55,10 @@ COrderInfo ord;
 int OnInit()
 {
     trade.SetExpertMagicNumber(EA_MAGIC);
-
+    // trade.SetDeviationInPoints()
     ArraySetAsSeries(rates, true);
 
-    handleEMA = iMA(_Symbol, PERIOD_CURRENT, periodEMA, 0, MODE_EMA, PRICE_CLOSE);
+    handleEMA = iMA(_Symbol, PERIOD_CURRENT, periodEMA, 0, MODE_SMA, PRICE_CLOSE);
     ArraySetAsSeries(bufferEMA, true);
 
     return INIT_SUCCEEDED;
@@ -88,7 +88,7 @@ void OnTick(void)
 
 bool NoDemandBarBearish(MqlRates &price[], double spreadThreshold, double wickThreshold)
 {
-    double spread = MathAbs(price[0].high - price[0].low);
+    double spread = MathAbs(price[0].open - price[0].close);
     double highWick = price[0].high - MathMax(price[0].close, price[0].open);
 
     ulong vol0 = price[0].tick_volume;

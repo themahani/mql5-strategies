@@ -35,7 +35,7 @@ double ph[10];
 double pl[10];
 
 int pivotHistory = 10;
-int lenBack = 99;
+int histBars = 99;
 
 int handleRSI;
 double bufferRSI[];
@@ -214,10 +214,10 @@ void OnTick(void)
     
     if (!newBar()) return;
 
-    CopyRates(Symbol(), PERIOD_CURRENT, 1, lenBack, rates);
-    CopyRates(Symbol(), periodHigher, 1, lenBack, ratesHigher);
-    CopyBuffer(handleRSI, MAIN_LINE, 1, lenBack, bufferRSI);
-    CopyBuffer(handleMA, MAIN_LINE, 1, lenBack, bufferMA);
+    CopyRates(Symbol(), PERIOD_CURRENT, 1, histBars, rates);
+    CopyRates(Symbol(), periodHigher, 1, histBars, ratesHigher);
+    CopyBuffer(handleRSI, MAIN_LINE, 1, histBars, bufferRSI);
+    CopyBuffer(handleMA, MAIN_LINE, 1, histBars, bufferMA);
 
     updatePivot();
     Comment(ph[0], "\n", pl[0], "\n", ph[1], "\n", pl[1]);
