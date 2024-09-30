@@ -1,5 +1,6 @@
 
-#property  copyright "Ali Mahani"
+#property  copyright "Copyright 2024, Ali Mahani"
+#property link       "ali.a.mahani@zoho.com"
 
 // ----------- Include ---------
 #include "include/data_analysis.mqh"

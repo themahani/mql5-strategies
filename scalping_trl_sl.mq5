@@ -178,13 +178,13 @@ bool newBar()
 bool BuyCondition()
 {
     // return bufferMALow[0] > bufferMAHigh[0];
-    return bufferRSI[nBars] < highRSI; 
+    return bufferRSI[0] < highRSI; 
 }
 
 bool SellCondition()
 {
     // return bufferMALow[0] < bufferMAHigh[0];
-    return bufferRSI[nBars] > lowRSI;
+    return bufferRSI[0] > lowRSI;
 }
 
 
