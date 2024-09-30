@@ -19,8 +19,7 @@ input color svlc = clrGreen;                           // start vline color
 input color evlc = clrGreen;                           // end vline color
 
 input group "Pivot High/Low";
-input int pivotLen = 14;                                // Bars to look around for Pivots
-
+input int pivotLen = 14; // Bars to look around for Pivots
 
 // ------------ Global ----------
 enum ENUM_PIVOT_TYPE
@@ -35,16 +34,33 @@ struct Pivot
     double value;
     datetime time;
     ENUM_PIVOT_TYPE type;
+    Pivot copy()
+    {
+        Pivot element = {value, time, type};
+        return element;
+    }
 };
 
 Pivot pivots[];
 int historySize = 50;
-double volumeProfile[];
+
+struct VolumeProfile
+{
+    double price;
+    double profile;
+    VolumeProfile copy()
+    {
+        VolumeProfile element = {price, profile};
+        return element;
+    }
+};
+
+VolumeProfile volumeProfile[];
 
 int OnInit()
 {
-    ArrayResize(pivots, historySize);
     ArraySetAsSeries(pivots, true);
+    ArrayResize(pivots, historySize);
 
     return INIT_SUCCEEDED;
 }
@@ -57,58 +73,87 @@ void OnTick(void)
 {
     if (!newBar())
         return;
-    
-    if (!UpdatePivots())
+
+    if (!IsPivotHigh() && !IsPivotLow())
+        return;
+
+    if (pivots[0].type == pivots[1].type)
+        return;
+
+    if (pivots[0].value == 0 || pivots[1].value == 0)
         return;
     
     iVolumeProfile(timeframeVP, pivots[1].time, pivots[0].time, ratioVP, precisionVP, appliedVolume, volumeProfile);
+    int size = ArraySize(volumeProfile);
+    Comment(volumeProfile[0].price, "\n", volumeProfile[size-1].price,
+            "\n", pivots[0].value, "\n", pivots[1].value);
 
 }
 
+void DrawLines(VolumeProfile &vp[])
+{
+    int size = ArraySize(vp);
+    ObjectsDeleteAll(0, "price", -1, OBJ_HLINE);
+    for (int i = size - 1; i > 0; i--)
+    {
+        if (vp[i].price == 0 || vp[i].profile == 0)
+            break;
+        if (vp[i-1].profile < vp[i].profile / 2.0)
+        {
+            datetime now = iTime(_Symbol, 0, 1);
+            if (!ObjectCreate(0, "price" + IntegerToString(i), OBJ_HLINE, 0, now, vp[i].price))
+            {
+                Print("Failed to Draw hline: ", GetLastError());
+            }
+        }
+    }
 
+}
 
-template <typename T>
-void UpdateSeries(T &arr[], const T &newValue)
+void UpdateSeriesPivot(Pivot &arr[], const Pivot &newValue)
 {
     int size = ArraySize(arr);
-    for (int i = size-2; i > 0; i--)
+    for (int i = size - 1; i > 0; i--)
     {
-        arr[i+1] = arr[i];
+        arr[i] = arr[i-1];
     }
     arr[0] = newValue;
 }
 
-
-bool UpdatePivots()
+bool IsPivotHigh()
 {
     double ph = PivotHigh(pivotLen);
-    double pl = PivotLow(pivotLen);
     if (ph)
     {
         datetime time = iTime(_Symbol, 0, pivotLen + 1);
         Pivot p = {ph, time, PIVOT_HIGH};
-        UpdateSeries(pivots, p);
-        return true;
-    }
-    else if (pl)
-    {
-        datetime time = iTime(_Symbol, 0, pivotLen + 1);
-        Pivot p = {pl, time, PIVOT_LOW};
-        UpdateSeries(pivots, p);
+        UpdateSeriesPivot(pivots, p.copy());
         return true;
     }
     return false;
 }
 
+bool IsPivotLow()
+{
+    double pl = PivotLow(pivotLen);
+    if (pl)
+    {
+        datetime time = iTime(_Symbol, 0, pivotLen + 1);
+        Pivot p = {pl, time, PIVOT_LOW};
+        UpdateSeriesPivot(pivots, p.copy());
+        return true;
+    }
+    return false;
+}
 
 void DrawLines(double &profile[])
 {
     int size = ArraySize(profile);
-    
 }
 
-void iVolumeProfile(ENUM_TIMEFRAMES tf, datetime time_begin, datetime time_finish, 
-                    double ratio, int precision, ENUM_APPLIED_VOLUME av, double &profile[])
+void iVolumeProfile(ENUM_TIMEFRAMES tf, datetime time_begin, datetime time_finish,
+                    double ratio, int precision, ENUM_APPLIED_VOLUME av, VolumeProfile &vp[],
+                    bool visualize = true)
 {
 
     //---Number of bars in the range based on the calculation timeframe (not the current timeframe visible in the chart).
@@ -136,9 +181,9 @@ void iVolumeProfile(ENUM_TIMEFRAMES tf, datetime time_begin, datetime time_finis
     double range = (max - min) / precision;                            // height of the VP bars
 
     //---Create an array to store the VP data
-    // double profile[];
+    double profile[];
     ArrayResize(profile, precision);
-
+    ArrayResize(vp, precision);
     //---Calculate VP array
     //---Loop through all price bars in the range and cumulatively assign their volume to VPs.
     for (int i = 0; i < bars && !IsStopped(); i++)
@@ -168,6 +213,13 @@ void iVolumeProfile(ENUM_TIMEFRAMES tf, datetime time_begin, datetime time_finis
                 profile[n] += (range / body) * volume[i]; // when a part of the candle covers the entire height of the nth level
         }
     }
+    for (int i = 0; i < precision; i++)
+    {
+        double price = min + range * i;
+        VolumeProfile element = {price, profile[i]};
+        vp[i] = element.copy();
+    }
+
     //--- Point of Control is the maximum VP found in the volume profile array
     double POC = profile[ArrayMaximum(profile, 0, WHOLE_ARRAY)];
     //---Define the maximum length of VP bars (which is for POC) by considering the width of the chart and ratio input
@@ -177,40 +229,35 @@ void iVolumeProfile(ENUM_TIMEFRAMES tf, datetime time_begin, datetime time_finis
 
     if (POC == 0.0)
         return;
+    
+    if (!visualize)
+        return;
     //---delete all existing bars before drawing new ones
     ObjectsDeleteAll(0, "VP prfl ", -1, -1);
 
-    for (int i = precision-1; i > 0; i--)
+    //---Draw VP bars one by one from the lowest price in the range to the highest
+    for (int n = 0; n < precision; n++)
     {
-        if (profile[i-1] < profile[i] / 2.0)
+        //--- The length of each VP bar is calculated by its ratio to POC
+        int xd = (int)((profile[n] / POC) * BL);
+        int x_start = 0;
+        int y_start = 0;
+        //--- Finding the xy position for drawing VPs according to the end vline and min price in the range
+        ChartTimePriceToXY(0, 0, time_finish, min + (n + 1) * range, x_start, y_start);
+        //--- In case the end of VPs go beyond the visible chart
+        if (x_start + xd >= ChartGetInteger(0, CHART_WIDTH_IN_PIXELS))
+            xd = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - x_start;
+        //---Draw rectangle lable to display VP bars, using RectLabelCreate function
+        RectLabelCreate("VP prfl " + IntegerToString(n), x_start, y_start, xd, ch, gc);
+        //---Change the color of POC
+        if (profile[n] == POC)
         {
-            ObjectCreate(0, "price" + IntegerToString(i), OBJ_HLINE, 0, time_begin, min + range * i);
+            ObjectSetInteger(0, "VP prfl " + IntegerToString(n), OBJPROP_COLOR, pocc);
+            ObjectSetInteger(0, "VP prfl " + IntegerToString(n), OBJPROP_BGCOLOR, pocc);
         }
     }
-
-    //---Draw VP bars one by one from the lowest price in the range to the highest
-    // for (int n = 0; n < precision; n++)
-    // {
-    //     //--- The length of each VP bar is calculated by its ratio to POC
-    //     int xd = (int)((profile[n] / POC) * BL);
-    //     int x_start = 0;
-    //     int y_start = 0;
-    //     //--- Finding the xy position for drawing VPs according to the end vline and min price in the range
-    //     ChartTimePriceToXY(0, 0, time_finish, min + (n + 1) * range, x_start, y_start);
-    //     //--- In case the end of VPs go beyond the visible chart
-    //     if (x_start + xd >= ChartGetInteger(0, CHART_WIDTH_IN_PIXELS))
-    //         xd = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - x_start;
-    //     //---Draw rectangle lable to display VP bars, using RectLabelCreate function
-    //     RectLabelCreate("VP prfl " + IntegerToString(n), x_start, y_start, xd, ch, gc);
-    //     //---Change the color of POC
-    //     if (profile[n] == POC)
-    //     {
-    //         ObjectSetInteger(0, "VP prfl " + IntegerToString(n), OBJPROP_COLOR, pocc);
-    //         ObjectSetInteger(0, "VP prfl " + IntegerToString(n), OBJPROP_BGCOLOR, pocc);
-    //     }
-    // }
-    // //---
-    // ChartRedraw(0L);
+    //---
+    ChartRedraw(0L);
 }
 
 bool RectLabelCreate(const string name = "RectLabel",                   // label name
