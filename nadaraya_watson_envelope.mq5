@@ -1,22 +1,23 @@
 
-#property copyright "Copyright 2024, Ali Mahani"
-#property link "ali.a.mahani@zoho.com"
+#property  copyright   "Copyright 2024, Ali Mahani"
+#property  link        "ali.a.mahani@zoho.com"
 
 // ----------- Include ---------
 #include "include/data_analysis.mqh"
 #include "include/time.mqh"
 #include "include/trading.mqh"
+// #include <Indicators/mql5-indicators> 
 
 // ----------- Inputs ----------
-input group "Smart Money Concepts";
-input double maxSpread = 50; // Max. spread in Points - No Demand Bar (10 pts = 1 pip)
-input double minWick = 40;   // Min. wick size in Points - No Demand Bar (10 pts = 1 pip)
-input int periodEMA = 14;    // EMA period
+input group "Nadaraya Watson Parameters";
+input int   numBarsNW = 200;          // Count of bars to look back
+input double bandwidthNW = 10;        // Bandwidth -- Standard Deviation of the Gaussian 
+input double multiplierNW = 2.0;         // Multiplier for the envelope -- value * stddev
 
 input group "Trade Management";
 input double riskPercent = 2.0; // Risk as a % of trading capital
 input double profitFactor = 2.0;
-input ulong EA_MAGIC = 3948302840; // EA Magic ID
+input ulong EA_MAGIC = 59204508; // EA Magic ID
 // input int tpPoints = 200;               // Take Profit in Points (10 points = 1 pip)
 input int slPoints = 200;        // Stop Loss in Points (10 points = 1 pip)
 input int tslTriggerPoints = 15; // Points in profit before trailing SL is activated (10 points = 1 pip)
@@ -33,76 +34,84 @@ input int endMinute = 0;
 Time startTime = {startHour, startMinute, 0};
 Time endTime = {endHour, endMinute, 0};
 
-// ---------- Variables ----------
-MqlRates rates[];
-int histBars = 100;
 
-// -------- Indicators --------
-int handleEMA;
-double bufferEMA[];
 
-// ----------- Trade ---------
+// ------------ NW indicator ----------
+int handleNW;
+double bufferUpperNW[];
+double bufferLowerNW[];
+double bufferMainNW[];
+
+// ---------- Globals ----------
 CTrade trade;
 CPositionInfo pos;
 COrderInfo ord;
 
+
 int OnInit()
 {
+    handleNW = iCustom(_Symbol, PERIOD_CURRENT, "mql5-indicators/codebase/NadarayaWatson",
+                       numBarsNW, bandwidthNW, multiplierNW);
+    ArraySetAsSeries(bufferUpperNW, true);
+    ArraySetAsSeries(bufferLowerNW, true);
+    ArraySetAsSeries(bufferMainNW, true);
+
     trade.SetExpertMagicNumber(EA_MAGIC);
-    // trade.SetDeviationInPoints()
-    ArraySetAsSeries(rates, true);
-
-    handleEMA = iMA(_Symbol, PERIOD_CURRENT, periodEMA, 0, MODE_SMA, PRICE_CLOSE);
-    ArraySetAsSeries(bufferEMA, true);
-
     return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
+
 }
 
 void OnTick(void)
 {
     if (trailStop)
         TrailStop(pos, trade, EA_MAGIC, tslTriggerPoints, tslPoints);
+    
     if (!newBar())
         return;
 
-    CopyRates(_Symbol, PERIOD_CURRENT, 1, histBars, rates);
-    CopyBuffer(handleEMA, MAIN_LINE, 1, histBars, bufferEMA);
-    NoDemandBarBearish(rates, maxSpread, minWick);
-    // if (PositionsTotal() == 0 && TradeSession(startTime, endTime))
-    // {
-    //     if (NoDemandBarBearish(rates, maxSpread, minWick) && rates[0].close < bufferEMA[0])
-    //     {
-    //         Sell();
-    //     }
-    // }
+    if (PositionsTotal() != 0 || !TradeSession(startTime, endTime))
+        return;
+    
+    CopyBuffer(handleNW, 0, 1, 20, bufferUpperNW);
+    CopyBuffer(handleNW, 1, 1, 20, bufferLowerNW);
+    CopyBuffer(handleNW, 2, 1, 20, bufferMainNW);
+
+    if (BuyCondition())
+        Buy();
+    
+    if (SellCondition())
+        Sell();
+
 }
 
-void DrawArrow(const string arrowName, const datetime arrowTime, const double arrowPrice)
+
+bool BuyCondition()
 {
-
-    if (!ObjectCreate(0, arrowName, OBJ_ARROW_DOWN, 0, arrowTime, arrowPrice))
-        Print("Failed to Create Object Arrow Down.");
-}
-
-bool NoDemandBarBearish(MqlRates &price[], double spreadThreshold, double wickThreshold)
-{
-    double spread = MathAbs(price[0].open - price[0].close);
-    double highWick = price[0].high - MathMax(price[0].close, price[0].open);
-
-    ulong vol0 = price[0].tick_volume;
-    ulong vol1 = price[1].tick_volume;
-    ulong vol2 = price[2].tick_volume;
-    if (spread < spreadThreshold * _Point && highWick > wickThreshold * _Point && vol0 < vol1 && vol0 < vol2)
-    {
-        Alert("No Demand Bar Found!");
-        datetime now = iTime(_Symbol, PERIOD_CURRENT, 1);
-        DrawArrow("NDB", now, price[0].high);
+    double close = iClose(_Symbol, PERIOD_CURRENT, 1);
+    long volume = iVolume(_Symbol, PERIOD_CURRENT, 1);
+    long prevVolume = iVolume(_Symbol, PERIOD_CURRENT, 2);
+    if (close < bufferLowerNW[0]        // Close below the Lower envelope
+        && prevVolume < volume          // close with higher volume
+        && bufferMainNW[0] > bufferMainNW[1])       // NW in an uptrend
         return true;
-    }
+    
+    return false;
+}
+
+bool SellCondition()
+{
+    double close = iClose(_Symbol, PERIOD_CURRENT, 1);
+    long volume = iVolume(_Symbol, PERIOD_CURRENT, 1);
+    long prevVolume = iVolume(_Symbol, PERIOD_CURRENT, 2);
+    if (close > bufferUpperNW[0]        // Close above the Upper envelope
+        && prevVolume < volume          // close with higher volume
+        && bufferMainNW[0] < bufferMainNW[1])       // NW in a downtrend
+        return true;
+    
     return false;
 }
 
