@@ -83,8 +83,8 @@ void OnTick(void)
     if (BuyCondition())
         Buy();
     
-    if (SellCondition())
-        Sell();
+    // if (SellCondition())
+        // Sell();
 
 }
 
@@ -92,10 +92,13 @@ void OnTick(void)
 bool BuyCondition()
 {
     double close = iClose(_Symbol, PERIOD_CURRENT, 1);
+    double prevClose = iClose(_Symbol, PERIOD_CURRENT, 2);
     long volume = iVolume(_Symbol, PERIOD_CURRENT, 1);
     long prevVolume = iVolume(_Symbol, PERIOD_CURRENT, 2);
-    if (close < bufferLowerNW[0]        // Close below the Lower envelope
-        && prevVolume < volume          // close with higher volume
+    if (prevClose < bufferUpperNW[1]    // ...
+        && prevClose > bufferLowerNW[1]    // Prev. close in the nadaraya envelope
+        && close < bufferLowerNW[0]     // Close below the Lower envelope
+        && prevVolume > volume          // close with lower volume
         && bufferMainNW[0] > bufferMainNW[1])       // NW in an uptrend
         return true;
     
@@ -105,10 +108,13 @@ bool BuyCondition()
 bool SellCondition()
 {
     double close = iClose(_Symbol, PERIOD_CURRENT, 1);
+    double prevClose = iClose(_Symbol, PERIOD_CURRENT, 2);
     long volume = iVolume(_Symbol, PERIOD_CURRENT, 1);
     long prevVolume = iVolume(_Symbol, PERIOD_CURRENT, 2);
-    if (close > bufferUpperNW[0]        // Close above the Upper envelope
-        && prevVolume < volume          // close with higher volume
+    if (prevClose > bufferLowerNW[1]
+        && prevClose < bufferUpperNW[1]     // Prev. close in the envelope
+        && close > bufferUpperNW[0]        // Close above the Upper envelope
+        && prevVolume > volume          // close with higher volume
         && bufferMainNW[0] < bufferMainNW[1])       // NW in a downtrend
         return true;
     
