@@ -19,10 +19,16 @@ input double riskPercent = 2.0; // Risk as a % of trading capital
 input double profitFactor = 2.0;
 input ulong EA_MAGIC = 59204508; // EA Magic ID
 input int slPoints = 200;        // Stop Loss in Points (10 points = 1 pip)
+input double slCoeff = 1.5;                   // SL weight from ATR
+input double tpCoeff = 2;                     // TP weight from ATR
 input bool trailStop = true;     // Use Trailing SL?
 input int tslTriggerPoints = 15; // Points in profit before trailing SL is activated (10 points = 1 pip)
 input int tslPoints = 10;        // Trailing SL (10 points = 1 pip)
-input int expBars = 100;         // # of bars after which the orders expire
+
+input group "Indicators";
+input int periodATR = 14;               // ATR period
+
+// input int expBars = 100;         // # of bars after which the orders expire
 
 input group "Trade Session UTC";
 input int startHour = 0;
@@ -39,6 +45,10 @@ double bufferUpperNW[];
 double bufferLowerNW[];
 double bufferMainNW[];
 
+int handleATR;
+double bufferATR[];
+
+
 // ---------- Globals ----------
 CTrade trade;
 CPositionInfo pos;
@@ -51,6 +61,9 @@ int OnInit()
     ArraySetAsSeries(bufferUpperNW, true);
     ArraySetAsSeries(bufferLowerNW, true);
     ArraySetAsSeries(bufferMainNW, true);
+    
+    handleATR = iATR(Symbol(), PERIOD_CURRENT, periodATR);
+    ArraySetAsSeries(bufferATR, true);
 
     trade.SetExpertMagicNumber(EA_MAGIC);
     return INIT_SUCCEEDED;
@@ -68,18 +81,20 @@ void OnTick(void)
     if (!newBar())
         return;
 
-    if (PositionsTotal() != 0 || !TradeSession(startTime, endTime))
-        return;
-
     CopyBuffer(handleNW, 0, 1, 20, bufferUpperNW);
     CopyBuffer(handleNW, 1, 1, 20, bufferLowerNW);
     CopyBuffer(handleNW, 2, 1, 20, bufferMainNW);
 
+    CopyBuffer(handleATR, MAIN_LINE, 1, 20, bufferATR);
+
+    if (PositionsTotal() != 0 || !TradeSession(startTime, endTime))
+        return;
+
     if (BuyCondition())
         Buy();
     
-    // if (SellCondition())
-        // Sell();
+    if (SellCondition())
+        Sell();
 
 }
 
@@ -93,7 +108,8 @@ bool BuyCondition()
         && prevClose > bufferLowerNW[1]    // Prev. close in the nadaraya envelope
         && close < bufferLowerNW[0]     // Close below the Lower envelope
         && prevVolume > volume          // close with lower volume
-        && bufferMainNW[0] > bufferMainNW[1])       // NW in an uptrend
+        // && bufferMainNW[0] < bufferMainNW[1]
+        )       // NW in an uptrend
         return true;
 
     return false;
@@ -108,8 +124,9 @@ bool SellCondition()
     if (prevClose > bufferLowerNW[1]
         && prevClose < bufferUpperNW[1]     // Prev. close in the envelope
         && close > bufferUpperNW[0]        // Close above the Upper envelope
-        && prevVolume > volume          // close with higher volume
-        && bufferMainNW[0] < bufferMainNW[1])       // NW in a downtrend
+        && prevVolume < volume          // close with higher volume
+        // && bufferMainNW[0] > bufferMainNW[1]
+        )       // NW in a downtrend
         return true;
 
     return false;
@@ -119,7 +136,7 @@ void Sell()
 {
     double entry = SymbolInfoDouble(Symbol(), SYMBOL_BID);
 
-    double slDiff = slPoints * _Point;
+    double slDiff = MathMin(slPoints * _Point, slCoeff * bufferATR[0]);
     double sl = entry + slDiff;
     double tp = entry - slDiff * profitFactor;
 
@@ -127,7 +144,7 @@ void Sell()
     if (riskPercent > 0)
         lots = calculateLots(slDiff, riskPercent);
 
-    datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
+    // datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
     if (!trade.Sell(lots, _Symbol, entry, sl, tp))
     {
         Alert("Sell Failed! ", _LastError);
@@ -136,9 +153,9 @@ void Sell()
 
 void Buy()
 {
-    double entry = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+    double entry = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
 
-    double slDiff = slPoints * _Point;
+    double slDiff = MathMin(slPoints * _Point, slCoeff * bufferATR[0]);
     double sl = entry - slDiff;
     double tp = entry + slDiff * profitFactor;
 
@@ -146,7 +163,7 @@ void Buy()
     if (riskPercent > 0)
         lots = calculateLots(slDiff, riskPercent);
 
-    datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
+    // datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
     if (!trade.Buy(lots, _Symbol, entry, sl, tp))
     {
         Alert("Buy Failed! ", _LastError);
