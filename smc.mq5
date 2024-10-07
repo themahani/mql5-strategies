@@ -9,10 +9,10 @@
 
 // ----------- Inputs ----------
 input group "Smart Money Concepts";
-input double maxSpread = 50; // Max. spread in Points - No Demand Bar (10 pts = 1 pip)
-input double minWick = 40;   // Min. wick size in Points - No Demand Bar (10 pts = 1 pip)
-input int periodEMA = 14;    // MA period
-input ENUM_MA_METHOD methodEMA = MODE_EMA;        // MA method
+input double maxSpread = 40; // Max. spread in Points - No Demand Bar (10 pts = 1 pip)
+input double minWick = 50;   // Min. wick size in Points - No Demand Bar (10 pts = 1 pip)
+input int periodMA = 14;    // MA period
+input ENUM_MA_METHOD methodMA = MODE_EMA;        // MA method
 
 input group "Trade Management";
 input double riskPercent = 2.0; // Risk as a % of trading capital
@@ -20,11 +20,11 @@ input double profitFactor = 2.0;
 input ulong EA_MAGIC = 3948302840; // EA Magic ID
 // input int tpPoints = 200;               // Take Profit in Points (10 points = 1 pip)
 input int slPoints = 200;        // Stop Loss in Points (10 points = 1 pip)
+input int periodATR = 8;            // ATR period for SL calculation.
 input double slATR = 2.0;            // SL multiplier with ATR
 input bool trailStop = true;     // Use Trailing SL?
 input int tslTriggerPoints = 15; // Points in profit before trailing SL is activated (10 points = 1 pip)
 input int tslPoints = 10;        // Trailing SL (10 points = 1 pip)
-input int expBars = 100;         // # of bars after which the orders expire
 
 input group "Trade Session UTC";
 input int startHour = 0;
@@ -40,8 +40,8 @@ MqlRates rates[];
 int histBars = 100;
 
 // -------- Indicators --------
-int handleEMA;
-double bufferEMA[];
+int handleMA;
+double bufferMA[];
 
 int handleATR;
 double bufferATR[];
@@ -57,11 +57,11 @@ int OnInit()
     // trade.SetDeviationInPoints()
     ArraySetAsSeries(rates, true);
 
-    handleEMA = iMA(_Symbol, PERIOD_CURRENT, periodEMA, 0, methodEMA, PRICE_CLOSE);
-    ArraySetAsSeries(bufferEMA, true);
+    handleMA = iMA(_Symbol, PERIOD_CURRENT, periodMA, 0, methodMA, PRICE_CLOSE);
+    ArraySetAsSeries(bufferMA, true);
 
-    handleATR = iATR(_Symbol, PERIOD_CURRENT, 14);
-    ArraySetAsSeries(bufferEMA, true);
+    handleATR = iATR(_Symbol, PERIOD_CURRENT, periodATR);
+    ArraySetAsSeries(bufferMA, true);
 
     return INIT_SUCCEEDED;
 }
@@ -78,18 +78,18 @@ void OnTick(void)
         return;
 
     CopyRates(_Symbol, PERIOD_CURRENT, 1, histBars, rates);
-    CopyBuffer(handleEMA, MAIN_LINE, 1, histBars, bufferEMA);
+    CopyBuffer(handleMA, MAIN_LINE, 1, histBars, bufferMA);
     CopyBuffer(handleATR, MAIN_LINE, 1, histBars, bufferATR);
 
     // NoDemandBarBearish(rates, maxSpread, minWick);
     
     if (PositionsTotal() == 0 && TradeSession(startTime, endTime))
     {
-        if (NoDemandBarBearish(rates, maxSpread, minWick) && rates[0].close < bufferEMA[0])
+        if (BuyCondition(rates) && rates[0].close > bufferMA[0])
         {
             Buy();
         }
-        if (NoDemandBarBullish(rates, maxSpread, minWick) && rates[0].close > bufferEMA[0])
+        if (SellCondition(rates) && rates[0].close < bufferMA[0])
         {
             Sell();
         }    
@@ -111,9 +111,12 @@ bool NoDemandBarBearish(MqlRates &price[], double spreadThreshold, double wickTh
     ulong vol0 = price[0].tick_volume;
     ulong vol1 = price[1].tick_volume;
     ulong vol2 = price[2].tick_volume;
-    if (spread < spreadThreshold * _Point && highWick > wickThreshold * _Point && vol0 < vol1 && vol0 < vol2)
+    if (isBullish(price[0])
+        && spread < spreadThreshold * _Point 
+        && highWick > wickThreshold * _Point 
+        && vol0 < vol1 && vol0 < vol2)
     {
-        Alert("No Demand Bar Found!");
+        Print("No Demand Bar Found!");
         datetime now = iTime(_Symbol, PERIOD_CURRENT, 1);
         DrawArrow("NDB", now, price[0].high);
         return true;
@@ -121,7 +124,7 @@ bool NoDemandBarBearish(MqlRates &price[], double spreadThreshold, double wickTh
     return false;
 }
 
-bool NoDemandBarBullish(MqlRates &price[], double spreadThreshold, double wickThreshold)
+bool NoSupplyBarBullish(MqlRates &price[], double spreadThreshold, double wickThreshold)
 {
     double spread = MathAbs(price[0].open - price[0].close);
     double lowWick = MathAbs(price[0].low - MathMin(price[0].close, price[0].open));
@@ -129,14 +132,37 @@ bool NoDemandBarBullish(MqlRates &price[], double spreadThreshold, double wickTh
     ulong vol0 = price[0].tick_volume;
     ulong vol1 = price[1].tick_volume;
     ulong vol2 = price[2].tick_volume;
-    if (spread < spreadThreshold * _Point && lowWick > wickThreshold * _Point && vol0 < vol1 && vol0 < vol2)
+    if (!isBullish(price[0]) 
+        && spread < spreadThreshold * _Point 
+        && lowWick > wickThreshold * _Point && 
+        vol0 < vol1 && vol0 < vol2)
     {
-        Alert("No Demand Bar Found!");
+        Print("No Supply Bar Found!");
         datetime now = iTime(_Symbol, PERIOD_CURRENT, 1);
-        DrawArrow("NDB", now, price[0].low);
+        DrawArrow("NSB", now, price[0].low);
         return true;
     }
     return false;
+}
+
+bool BuyCondition(MqlRates &price[])
+{
+    bool bullish1 = isBullish(price[1]);
+    bool bullish2 = isBullish(price[2]);
+    bool bullish3 = isBullish(price[3]);
+    return (bullish1 && bullish2 
+            // && bullish3 
+            && NoSupplyBarBullish(price, maxSpread, minWick));
+}
+
+bool SellCondition(MqlRates &price[])
+{
+    bool bearish1 = !isBullish(price[1]);
+    bool bearish2 = !isBullish(price[2]);
+    bool bearish3 = !isBullish(price[3]);
+    return (bearish1 && bearish2 
+            // && bearish3 
+            && NoDemandBarBearish(price, maxSpread, minWick));
 }
 
 void Sell()
@@ -152,7 +178,7 @@ void Sell()
     if (riskPercent > 0)
         lots = calculateLots(slDiff, riskPercent);
 
-    datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
+    // datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
     if (!trade.Sell(lots, _Symbol, entry, sl, tp))
     {
         Alert("Sell Failed! ", _LastError);
@@ -172,7 +198,7 @@ void Buy()
     if (riskPercent > 0)
         lots = calculateLots(slDiff, riskPercent);
 
-    datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
+    // datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
     if (!trade.Buy(lots, _Symbol, entry, sl, tp))
     {
         Alert("Buy Failed! ", _LastError);
