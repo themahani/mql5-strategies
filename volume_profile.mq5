@@ -19,7 +19,7 @@ input color svlc = clrGreen;                           // start vline color
 input color evlc = clrGreen;                           // end vline color
 
 input group "Pivot High/Low";
-input int pivotLen = 14; // Bars to look around for Pivots
+input int pivotLen = 7; // Bars to look around for Pivots
 
 // ------------ Global ----------
 enum ENUM_PIVOT_TYPE
@@ -67,6 +67,7 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+    ObjectsDeleteAll(0, -1, -1);
 }
 
 void OnTick(void)
@@ -125,9 +126,16 @@ bool IsPivotHigh()
     double ph = PivotHigh(pivotLen);
     if (ph)
     {
-        datetime time = iTime(_Symbol, 0, pivotLen + 1);
-        Pivot p = {ph, time, PIVOT_HIGH};
-        UpdateSeriesPivot(pivots, p.copy());
+        datetime now = iTime(_Symbol, 0, pivotLen + 1);
+        Pivot p = {ph, now, PIVOT_HIGH};
+        if (pivots[0].type == PIVOT_HIGH)
+        {
+            pivots[0] = p.copy();            
+        }
+        else
+        {
+            UpdateSeriesPivot(pivots, p.copy());
+        }
         return true;
     }
     return false;
@@ -140,7 +148,14 @@ bool IsPivotLow()
     {
         datetime time = iTime(_Symbol, 0, pivotLen + 1);
         Pivot p = {pl, time, PIVOT_LOW};
-        UpdateSeriesPivot(pivots, p.copy());
+        if (pivots[0].type == PIVOT_LOW)
+        {
+            pivots[0] = p.copy();
+        }
+        else
+        {
+            UpdateSeriesPivot(pivots, p.copy());
+        }
         return true;
     }
     return false;
