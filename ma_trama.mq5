@@ -3,38 +3,26 @@
 //|                             Copyright 2000-2024, MetaQuotes Ltd. |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2000-2024, MetaQuotes Ltd."
-#property link "https://www.mql5.com"
+#property copyright "Copyright 2024, Ali Mahani"
+#property link "ali.a.mahani@zoho.com"
 #property version "5.50"
-#property description "It is important to make sure that the expert works with a normal"
-#property description "chart and the user did not make any mistakes setting input"
-#property description "variables (Lots, TakeProfit, TrailingStop) in our case,"
-#property description "we check TakeProfit on a chart of more than 2*trend_period bars"
 
-#define MACD_MAGIC 1234502
+
 //---
-#include <Trade/AccountInfo.mqh>
-#include <Trade/PositionInfo.mqh>
-#include <Trade/SymbolInfo.mqh>
-#include <Trade/Trade.mqh>
+#include "include/data_analysis.mqh"
+#include "include/time.mqh"
+#include "include/trading.mqh"
+
+
 //---
-
-input group "iMA Params" input ENUM_TIMEFRAMES timeFrameMA = PERIOD_H1;
-input int periodMA = 100;
-input ENUM_MA_METHOD methodMA = MODE_SMA;
-input ENUM_APPLIED_PRICE appliedPriceMA = PRICE_CLOSE;
-
 input group "Trade Management"
-// input double Lots = 0.1;
 input double riskPercent = 2.0; // Risk as a % of trading capital
 input double profitFactor = 2.0;
 input ulong EA_MAGIC = 3948302840; // EA Magic ID
-// input int tpPoints = 200;               // Take Profit in Points (10 points = 1 pip)
 input int slPoints = 200;        // Stop Loss in Points (10 points = 1 pip)
+input bool trailStop = true;        // Use trailing SL ?
 input int tslTriggerPoints = 15; // Points in profit before trailing SL is activated (10 points = 1 pip)
 input int tslPoints = 10;        // Trailing SL (10 points = 1 pip)
-input int barsLimitOrder = 4;    // Bars to look forward to for limit order
-input int expBars = 100;         // # of bars after which the orders expire
 
 input group "Trendline Breakout Params"
 input int lenBack = 14;                 // # of bars to look around for pivots detection
@@ -45,20 +33,10 @@ input int startMinute = 0;
 input int endHour = 6;
 input int endMinute = 0;
 
-// SMA
-int handleMA;
-double dataMA[2];
-
 // TRAMA
 int length = 99;
-double AMA = 0.0;
-
 MqlRates rates[];
-double highestArray[2];
-double lowestArray[2];
-double hh[];
-double ll[];
-int trends[];
+
 
 int numOfBars = 0;
 
@@ -74,6 +52,10 @@ double ph = 0.0, pl = 0.0;
 // iATR
 int handleATR;
 double bufferATR[];
+int handleTRAMA;
+double bufferTRAMA[];
+
+
 
 bool TradeSession()
 {
@@ -86,6 +68,74 @@ bool TradeSession()
 
     return (currentMins >= startMins && currentMins <= endMins);
 }
+
+
+
+
+CTrade trade;
+CPositionInfo pos;
+COrderInfo ord;
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit(void)
+{
+    // handleMA = iMA(_Symbol, _Period, periodMA, 0, methodMA, appliedPriceMA);
+    Print(_Symbol);
+
+    // TRAMA
+    ArraySetAsSeries(rates, true);
+
+    trade.SetExpertMagicNumber(EA_MAGIC);
+
+    handleATR = iATR(NULL, 0, lenBack);
+    ArraySetAsSeries(bufferATR, true);
+
+    handleTRAMA = iCustom(_Symbol, PERIOD_CURRENT, "mql5-indicators/trama");
+    ArraySetAsSeries(bufferTRAMA, true);
+
+    return (INIT_SUCCEEDED);
+}
+
+void OnDeinit(const int reason)
+{
+}
+
+//+------------------------------------------------------------------+
+//| Expert new tick handling function                                |
+//+------------------------------------------------------------------+
+void OnTick(void)
+{
+    if (trailStop)
+        TrailStop();
+    
+    if (!newBar())
+        return;
+
+    CopyBuffer(handleATR, MAIN_LINE, 0, lenBack, bufferATR);
+    CopyBuffer(handleTRAMA, MAIN_LINE, 0, lenBack, bufferTRAMA);
+    getRates();
+
+    UpdateTrendlines();
+
+    Comment(upper, "\n", lower, "\n", ph, "\n", pl);
+    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+    if (PositionsTotal() == 0 && TradeSession())
+    {
+        if (trendlineBreakUp() && ask > bufferTRAMA[0])
+        {
+            Buy();
+        }
+        else if (trendlineBreakDown() && bid < bufferTRAMA[0])
+        {
+            Sell();
+        }
+    }
+}
+//+------------------------------------------------------------------+
 
 double pivotHigh()
 {
@@ -218,212 +268,19 @@ void getRates()
         Print("Couldn't fetch data. Error: ", GetLastError());
 }
 
-double Highest(MqlRates &candles[])
-{
-    int size = ArraySize(candles);
-    double highestValue = 0.;
-    highestValue = iHigh(NULL, 0, iHighest(NULL, 0, MODE_HIGH, size, 1));
-    highestArray[0] = highestArray[1];
-    highestArray[1] = highestValue;
-    return highestValue;
-}
-
-double Lowest(MqlRates &candles[])
-{
-    int size = ArraySize(candles);
-    double lowestValue = DBL_MAX;
-    lowestValue = iLow(NULL, 0, iLowest(NULL, 0, MODE_LOW, size, 1));
-    lowestArray[0] = lowestArray[1];
-    lowestArray[1] = lowestValue;
-    return lowestValue;
-}
-
-double Change(double &array[])
-{
-    return array[0] - array[1];
-}
-
-double Sign(double num)
-{
-    return num > 0.0 ? 1.0 : num < 0.0 ? -1.0
-                                       : 0.0;
-}
-
-double MeanDouble(double &arr[])
-{
-    double mean = 0.0;
-    int size = ArraySize(arr);
-    for (int i = 0; i < size; i++)
-    {
-        mean += arr[i];
-    }
-    return mean / size;
-}
-
-double MeanInt(int &arr[])
-{
-    double mean = 0.0;
-    int size = ArraySize(arr);
-    for (int i = 0; i < size; i++)
-    {
-        mean += arr[i];
-    }
-    return mean / size;
-}
-
-/*
-// Update the values and shift to left.
-// Since the data is set as timeseries, the newest bar is index zero,
-// so we use that for our new value and shift the previous data to the left.
-*/
-void updateSeries(double &arr[], double newValue)
-{
-    int size = ArraySize(arr);
-    for (int i = size - 2; i >= 0; i--)
-    {
-        arr[i + 1] = arr[i];
-    }
-    arr[0] = newValue;
-}
-
-void calculateAMA()
-{
-    Highest(rates);
-    Lowest(rates);
-    updateSeries(hh, MathMax(Sign(Change(highestArray)), 0.0));
-    updateSeries(ll, MathMax(Sign(Change(lowestArray) * -1.0), 0.0));
-    // FIXME: Might only need to use updateSeries on the last value... I'll think about it later.
-    for (int i = 0; i < length; i++)
-    {
-        // TODO: Might need to expand this. Don't know exactly how MQL5 works is double conditionals.
-        trends[i] = (hh[i] || ll[i] ? 1 : 0);
-    }
-
-    double mean = MeanInt(trends);
-    double tc = MathPow(mean, 2); // Trade Coefficient
-    double src = rates[0].close;
-    AMA = (AMA == 0.0 ? src : AMA);
-    // if (AMA == 0.0) AMA = src;
-    AMA = (AMA + tc * (src - AMA));
-}
-
-double TRAMA = 0.;
-double _hh, _ll, _tc, prev_TRAMA;
-
-void calcTRAMA()
-{
-    // Calculate hh and ll based on highs and lows over 'length' period
-    double highestHigh = iHigh(NULL, 0, iHighest(NULL, 0, MODE_HIGH, length, 1));
-    double lowestLow = iLow(NULL, 0, iLowest(NULL, 0, MODE_LOW, length, 1));
-
-    // Calculate changes in highest and lowest values
-    _hh = MathMax(Sign(highestHigh - rates[0].high), 0);
-    _ll = MathMax(Sign(lowestLow - rates[0].low) * -1, 0);
-
-    // Trend Coefficient (tc)
-    double sum_hl = 0.0;
-    for (int j = 0; j < length; j++)
-    {
-        sum_hl += _hh || _ll ? 1.0 : 0.0;
-    }
-    _tc = MathPow(sum_hl / length, 2);
-
-    // Adaptive Moving Average calculation
-    prev_TRAMA = prev_TRAMA > 0 ? prev_TRAMA : rates[0].close; // Initial condition for first AMA
-    TRAMA = prev_TRAMA + _tc * (rates[0].close - prev_TRAMA);  // AMA recursive formula
-}
-
-CTrade trade;
-CPositionInfo pos;
-COrderInfo ord;
-
-//+------------------------------------------------------------------+
-//| Expert initialization function                                   |
-//+------------------------------------------------------------------+
-int OnInit(void)
-{
-    // handleMA = iMA(_Symbol, _Period, periodMA, 0, methodMA, appliedPriceMA);
-    Print(_Symbol);
-
-    // TRAMA
-    ArraySetAsSeries(rates, true);
-    ArrayResize(hh, length);
-    ArrayResize(ll, length);
-    ArrayResize(trends, length);
-    ArraySetAsSeries(hh, true);
-    ArraySetAsSeries(ll, true);
-
-    trade.SetExpertMagicNumber(EA_MAGIC);
-
-    handleATR = iATR(NULL, 0, lenBack);
-    ArraySetAsSeries(bufferATR, true);
-
-    return (INIT_SUCCEEDED);
-}
-
-void OnDeinit(const int reason)
-{
-}
-
-//+------------------------------------------------------------------+
-//| Expert new tick handling function                                |
-//+------------------------------------------------------------------+
-void OnTick(void)
-{
-    // TrailStop();
-    if (!newBar())
-        return;
-
-    CopyBuffer(handleATR, MAIN_LINE, 0, lenBack, bufferATR);
-    getRates();
-    calculateAMA();
-    calcTRAMA();
-    UpdateTrendlines();
-
-    Comment(AMA, "\n", TRAMA, "\n", lower, "\n", ph, "\n", pl);
-    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-
-    if (PositionsTotal() == 0 && TradeSession())
-    {
-        if (trendlineBreakUp() && ask > AMA)
-        {
-            Buy();
-        }
-        else if (trendlineBreakDown() && bid < AMA)
-        {
-            Sell();
-        }
-    }
-}
-//+------------------------------------------------------------------+
-
-bool newBar()
-{
-    static datetime previousTime = 0;
-    datetime newTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-
-    if (previousTime != newTime)
-    {
-        previousTime = newTime;
-        return true;
-    }
-    return false;
-}
-
 void Buy()
 {
     datetime now = iTime(_Symbol, PERIOD_CURRENT, 0);
-    datetime limitTime = now + barsLimitOrder * PeriodSeconds();
-    double entry = ObjectGetValueByTime(0, "upper", limitTime);
-    datetime expiration = now + expBars * PeriodSeconds();
+    // datetime limitTime = now + barsLimitOrder * PeriodSeconds();
+    double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+    // datetime expiration = now + expBars * PeriodSeconds();
     // double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     double diff = slPoints * _Point;
     double sl = entry - diff;
     double tp = entry + profitFactor * diff;
     double lots = calculateLots(diff);
 
-    if (!trade.BuyLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration, "Buy Limit!"))
+    if (!trade.Buy(lots, _Symbol, entry, sl, tp))
     {
         Print("Failed to Buy! Error: ", GetLastError());
     }
@@ -432,16 +289,16 @@ void Buy()
 void Sell()
 {
     datetime now = iTime(_Symbol, PERIOD_CURRENT, 0);
-    datetime limitTime = now + barsLimitOrder * PeriodSeconds();
-    double entry = ObjectGetValueByTime(0, "upper", limitTime);
-    datetime expiration = now + expBars * PeriodSeconds();
+    // datetime limitTime = now + barsLimitOrder * PeriodSeconds();
+    double entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    // datetime expiration = now + expBars * PeriodSeconds();
     // double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     double diff = slPoints * _Point;
     double sl = entry + diff;
     double tp = entry - profitFactor * diff;
     double lots = calculateLots(diff);
 
-    if (!trade.SellLimit(lots, entry, _Symbol, sl, tp, ORDER_TIME_SPECIFIED, expiration, "Sell Limit!"))
+    if (!trade.Sell(lots, _Symbol, entry, sl, tp))
     {
         Print("Failed to Sell! Error: ", GetLastError());
     }
@@ -507,3 +364,119 @@ double calculateLots(double slDiff)
 
     return lots;
 }
+
+
+// double Highest(MqlRates &candles[])
+// {
+//     int size = ArraySize(candles);
+//     double highestValue = 0.;
+//     highestValue = iHigh(NULL, 0, iHighest(NULL, 0, MODE_HIGH, size, 1));
+//     highestArray[0] = highestArray[1];
+//     highestArray[1] = highestValue;
+//     return highestValue;
+// }
+
+// double Lowest(MqlRates &candles[])
+// {
+//     int size = ArraySize(candles);
+//     double lowestValue = DBL_MAX;
+//     lowestValue = iLow(NULL, 0, iLowest(NULL, 0, MODE_LOW, size, 1));
+//     lowestArray[0] = lowestArray[1];
+//     lowestArray[1] = lowestValue;
+//     return lowestValue;
+// }
+
+// double Change(double &array[])
+// {
+//     return array[0] - array[1];
+// }
+
+// double Sign(double num)
+// {
+//     return num > 0.0 ? 1.0 : num < 0.0 ? -1.0
+//                                        : 0.0;
+// }
+
+// double MeanDouble(double &arr[])
+// {
+//     double mean = 0.0;
+//     int size = ArraySize(arr);
+//     for (int i = 0; i < size; i++)
+//     {
+//         mean += arr[i];
+//     }
+//     return mean / size;
+// }
+
+// double MeanInt(int &arr[])
+// {
+//     double mean = 0.0;
+//     int size = ArraySize(arr);
+//     for (int i = 0; i < size; i++)
+//     {
+//         mean += arr[i];
+//     }
+//     return mean / size;
+// }
+
+/*
+// Update the values and shift to left.
+// Since the data is set as timeseries, the newest bar is index zero,
+// so we use that for our new value and shift the previous data to the left.
+*/
+void updateSeries(double &arr[], double newValue)
+{
+    int size = ArraySize(arr);
+    for (int i = size - 2; i >= 0; i--)
+    {
+        arr[i + 1] = arr[i];
+    }
+    arr[0] = newValue;
+}
+
+// void calculateAMA()
+// {
+//     Highest(rates);
+//     Lowest(rates);
+//     updateSeries(hh, MathMax(Sign(Change(highestArray)), 0.0));
+//     updateSeries(ll, MathMax(Sign(Change(lowestArray) * -1.0), 0.0));
+//     // FIXME: Might only need to use updateSeries on the last value... I'll think about it later.
+//     for (int i = 0; i < length; i++)
+//     {
+//         // TODO: Might need to expand this. Don't know exactly how MQL5 works is double conditionals.
+//         trends[i] = (hh[i] || ll[i] ? 1 : 0);
+//     }
+
+//     double mean = MeanInt(trends);
+//     double tc = MathPow(mean, 2); // Trade Coefficient
+//     double src = rates[0].close;
+//     AMA = (AMA == 0.0 ? src : AMA);
+//     // if (AMA == 0.0) AMA = src;
+//     AMA = (AMA + tc * (src - AMA));
+// }
+
+// double TRAMA = 0.;
+// double _hh, _ll, _tc, prev_TRAMA;
+
+// void calcTRAMA()
+// {
+//     // Calculate hh and ll based on highs and lows over 'length' period
+//     double highestHigh = iHigh(NULL, 0, iHighest(NULL, 0, MODE_HIGH, length, 1));
+//     double lowestLow = iLow(NULL, 0, iLowest(NULL, 0, MODE_LOW, length, 1));
+
+//     // Calculate changes in highest and lowest values
+//     _hh = MathMax(Sign(highestHigh - rates[0].high), 0);
+//     _ll = MathMax(Sign(lowestLow - rates[0].low) * -1, 0);
+
+//     // Trend Coefficient (tc)
+//     double sum_hl = 0.0;
+//     for (int j = 0; j < length; j++)
+//     {
+//         sum_hl += _hh || _ll ? 1.0 : 0.0;
+//     }
+//     _tc = MathPow(sum_hl / length, 2);
+
+//     // Adaptive Moving Average calculation
+//     prev_TRAMA = prev_TRAMA > 0 ? prev_TRAMA : rates[0].close; // Initial condition for first AMA
+//     TRAMA = prev_TRAMA + _tc * (rates[0].close - prev_TRAMA);  // AMA recursive formula
+// }
