@@ -20,6 +20,7 @@ input double riskPercent = 2.0; // Risk as a % of trading capital
 input double profitFactor = 2.0;
 input ulong EA_MAGIC = 3948302840; // EA Magic ID
 input int slPoints = 200;        // Stop Loss in Points (10 points = 1 pip)
+input double slATR = 1.0;        // Stop Loss modifier using ATR
 input bool trailStop = true;        // Use trailing SL ?
 input int tslTriggerPoints = 15; // Points in profit before trailing SL is activated (10 points = 1 pip)
 input int tslPoints = 10;        // Trailing SL (10 points = 1 pip)
@@ -27,6 +28,9 @@ input int tslPoints = 10;        // Trailing SL (10 points = 1 pip)
 input group "Trendline Breakout Params"
 input int lenBack = 14;                 // # of bars to look around for pivots detection
 input double atrMultiplier = 1.0;                               // ATR multiplier
+
+input group "Indicator Params";
+input int periodRSI = 20;               // RSI Period
 
 input group "Trade Session UTC" input int startHour = 0;
 input int startMinute = 0;
@@ -49,11 +53,15 @@ double upos = 0.0;
 double dnos = 0.0;
 double ph = 0.0, pl = 0.0;
 
-// iATR
+// Indicators
 int handleATR;
 double bufferATR[];
+
 int handleTRAMA;
 double bufferTRAMA[];
+
+int handleRSI;
+double bufferRSI[];
 
 
 
@@ -81,10 +89,9 @@ COrderInfo ord;
 //+------------------------------------------------------------------+
 int OnInit(void)
 {
-    // handleMA = iMA(_Symbol, _Period, periodMA, 0, methodMA, appliedPriceMA);
     Print(_Symbol);
+    ChartSetInteger(0, CHART_SHOW_GRID, false);
 
-    // TRAMA
     ArraySetAsSeries(rates, true);
 
     trade.SetExpertMagicNumber(EA_MAGIC);
@@ -94,6 +101,9 @@ int OnInit(void)
 
     handleTRAMA = iCustom(_Symbol, PERIOD_CURRENT, "mql5-indicators/trama");
     ArraySetAsSeries(bufferTRAMA, true);
+
+    handleRSI = iRSI(_Symbol, PERIOD_CURRENT, periodRSI, PRICE_CLOSE);
+    ArraySetAsSeries(bufferRSI, true);
 
     return (INIT_SUCCEEDED);
 }
@@ -113,8 +123,9 @@ void OnTick(void)
     if (!newBar())
         return;
 
-    CopyBuffer(handleATR, MAIN_LINE, 0, lenBack, bufferATR);
-    CopyBuffer(handleTRAMA, MAIN_LINE, 0, lenBack, bufferTRAMA);
+    CopyBuffer(handleATR, MAIN_LINE, 1, lenBack, bufferATR);
+    CopyBuffer(handleTRAMA, MAIN_LINE, 1, lenBack, bufferTRAMA);
+    CopyBuffer(handleRSI, MAIN_LINE, 1, lenBack, bufferRSI);
     getRates();
 
     UpdateTrendlines();
@@ -125,11 +136,11 @@ void OnTick(void)
 
     if (PositionsTotal() == 0 && TradeSession())
     {
-        if (trendlineBreakUp() && ask > bufferTRAMA[0])
+        if (trendlineBreakUp() && ask > bufferTRAMA[0] && bufferRSI[0] > 55)
         {
             Buy();
         }
-        else if (trendlineBreakDown() && bid < bufferTRAMA[0])
+        else if (trendlineBreakDown() && bid < bufferTRAMA[0] && bufferRSI[0] < 45)
         {
             Sell();
         }
@@ -141,7 +152,7 @@ double pivotHigh()
 {
     double highest = 0;
     int count = 2 * lenBack + 1;
-    int highestIndex = iHighest(NULL, 0, MODE_HIGH, count, 0);
+    int highestIndex = iHighest(NULL, 0, MODE_HIGH, count, 1);
     if (highestIndex == (lenBack + 1))
         highest = iHigh(NULL, 0, highestIndex);
     return highest;
@@ -151,7 +162,7 @@ double pivotLow()
 {
     double lowest = 0;
     int count = 2 * lenBack + 1;
-    int highestIndex = iLowest(NULL, 0, MODE_LOW, count, 0);
+    int highestIndex = iLowest(NULL, 0, MODE_LOW, count, 1);
     if (highestIndex == (lenBack + 1))
         lowest = iLow(NULL, 0, highestIndex);
     return lowest;
@@ -180,7 +191,7 @@ bool DrawTrendline(double price, double slope, string name)
 
 double calculateSlope()
 {
-    double slope = bufferATR[0] / 10.0 * atrMultiplier;
+    double slope = bufferATR[0] / lenBack * atrMultiplier;
     return slope;
 }
 
@@ -216,12 +227,16 @@ bool trendlineBreakUp()
     double prevValue = ObjectGetValueByTime(0, "upper", prevTime, 0);
     double value = ObjectGetValueByTime(0, "upper", time, 0);
 
+    long prevVolume = iVolume(_Symbol, PERIOD_CURRENT, 2);
+    long volume = iVolume(_Symbol, PERIOD_CURRENT, 1);
+    bool highVolume = (volume > prevVolume);
+
     if (prevValue == 0 || value == 0)
     {
         Alert("Got zero value");
         return false;
     }
-    if (prevClose < prevValue && close > value)
+    if (prevClose < prevValue && close > value && highVolume)
     {
         Print("Trend Break Up");
         return true;
@@ -241,12 +256,15 @@ bool trendlineBreakDown()
     double prevValue = ObjectGetValueByTime(0, "lower", prevTime, 0);
     double value = ObjectGetValueByTime(0, "lower", time, 0);
 
+    long prevVolume = iVolume(_Symbol, PERIOD_CURRENT, 2);
+    long volume = iVolume(_Symbol, PERIOD_CURRENT, 1);
+    bool highVolume = (volume > prevVolume);
     if (prevValue == 0 || value == 0)
     {
         Alert("Got zero value");
         return false;
     }
-    if (prevClose > prevValue && close < value)
+    if (prevClose > prevValue && close < value && highVolume)
     {
         Print("Trend Break Down");
         return true;
@@ -275,10 +293,13 @@ void Buy()
     double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
     // datetime expiration = now + expBars * PeriodSeconds();
     // double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-    double diff = slPoints * _Point;
-    double sl = entry - diff;
+    // double diff = slPoints * _Point;
+    // double diff = slATR * bufferATR[0];
+    // double sl = entry - diff;
+    double sl = iLow(_Symbol, PERIOD_CURRENT, iLowest(_Symbol, PERIOD_CURRENT, MODE_LOW, 5, 0));
+    double diff = MathAbs(entry - sl);
     double tp = entry + profitFactor * diff;
-    double lots = calculateLots(diff);
+    double lots = calculateLots(diff, riskPercent);
 
     if (!trade.Buy(lots, _Symbol, entry, sl, tp))
     {
@@ -293,10 +314,13 @@ void Sell()
     double entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
     // datetime expiration = now + expBars * PeriodSeconds();
     // double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    double diff = slPoints * _Point;
-    double sl = entry + diff;
+    // double diff = slPoints * _Point;
+    // double diff = slATR * bufferATR[0];
+    // double sl = entry + diff;
+    double sl = iHigh(_Symbol, PERIOD_CURRENT, iHighest(_Symbol, PERIOD_CURRENT, MODE_LOW, 5, 0));
+    double diff = MathAbs(entry - sl);
     double tp = entry - profitFactor * diff;
-    double lots = calculateLots(diff);
+    double lots = calculateLots(diff, riskPercent);
 
     if (!trade.Sell(lots, _Symbol, entry, sl, tp))
     {
@@ -340,29 +364,6 @@ void TrailStop()
             }
         }
     }
-}
-
-double calculateLots(double slDiff)
-{
-    double risk = AccountInfoDouble(ACCOUNT_BALANCE) * riskPercent / 100.0;
-    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-    double lotstep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-    double minVolume = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MIN);
-    double maxVolume = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MAX);
-    double volumeLimit = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_LIMIT);
-
-    double moneyPerLotstep = slDiff / tickSize * tickValue * lotstep;
-    double lots = MathFloor(risk * moneyPerLotstep) * lotstep;
-    if (volumeLimit != 0)
-        lots = MathMin(lots, volumeLimit);
-    if (maxVolume != 0)
-        lots = MathMin(lots, maxVolume);
-    if (minVolume != 0)
-        lots = MathMax(lots, minVolume);
-    lots = NormalizeDouble(lots, 2);
-
-    return lots;
 }
 
 

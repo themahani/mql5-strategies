@@ -4,9 +4,9 @@
 #include <Trade/SymbolInfo.mqh>
 #include <Trade/Trade.mqh>
 
-double calculateLots(double slDiff, double riskPercent)
+double calculateLots(double slPoints, double riskPercent)
 {
-    double risk = AccountInfoDouble(ACCOUNT_BALANCE) * riskPercent / 100.0;
+    double risk = AccountInfoDouble(ACCOUNT_MARGIN_FREE) * riskPercent / 100.0;
     double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
     double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
     double lotstep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
@@ -15,12 +15,12 @@ double calculateLots(double slDiff, double riskPercent)
     double volumeLimit = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_LIMIT);
 
 
-    double moneyPerLotstep = slDiff / tickSize * tickValue * lotstep;
+    double moneyPerLotstep = (slPoints / tickSize) * tickValue * lotstep;
     double lots = MathFloor(risk * moneyPerLotstep) * lotstep;
-    if (volumeLimit != 0)   lots = MathMin(lots, volumeLimit);
+    // if (volumeLimit != 0)   lots = MathMin(lots, volumeLimit);
     if (maxVolume != 0)     lots = MathMin(lots, maxVolume);
     if (minVolume != 0)     lots = MathMax(lots, minVolume);
-    lots = NormalizeDouble(lots, 2);
+    // lots = NormalizeDouble(lots, 2);
 
     return lots;
 }
