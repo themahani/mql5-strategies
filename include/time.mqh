@@ -21,7 +21,12 @@ bool TradeSession(Time &start, Time &end)
     int endSec = end.hour * 3600 + end.min * 60 + end.sec;
     int currentSec = tm.hour * 3600 + tm.min * 60 + tm.sec;
 
-    return (currentSec >= startSec && currentSec <= endSec);
+    if (startSec > endSec)
+    {
+        return (currentSec >= startSec || currentSec <= endSec);
+    }
+    else
+        return (currentSec >= startSec && currentSec <= endSec);
 }
 
 bool newBar()

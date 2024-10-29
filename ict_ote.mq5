@@ -11,7 +11,23 @@
 input group "Pivot High/Low";
 input int pivotLen = 7; // Bars to look around for Pivots
 
+input group "Trade Management";
+input ulong EA_MAGIC = 59205709;    // Magic ID for EA
+input double riskPercent = 2.0;     // Risk as % of balance
+input int expBars = 50;             // # of Bars to expire limit order
+input bool trailStop = true;        // Use Trailing SL ?
+input int tslTriggerPoints = 50;        // TSL trigger in points
+input int tslPoints = 50;               // TSL in points
+input string tradeComment = "ICT OTE";      // Trading Bot Comment
 
+input group "Trade Session UTC";
+input int startHour = 0;
+input int startMinute = 0;
+input int endHour = 6;
+input int endMinute = 0;
+
+Time startTime = {startHour, startMinute, 0};
+Time endTime = {endHour, endMinute, 0};
 
 
 // ------------ Global ----------
@@ -43,6 +59,12 @@ int historySize = 50;
 MqlRates rates[];
 
 
+// ----------- Trade ---------
+CTrade trade;
+CPositionInfo pos;
+COrderInfo ord;
+
+
 int OnInit()
 {
     if (Period() != PERIOD_M5)
@@ -54,6 +76,7 @@ int OnInit()
     ArraySetAsSeries(pivots, true);
     ArrayResize(pivots, historySize);
 
+    trade.SetExpertMagicNumber(EA_MAGIC);
 
     return INIT_SUCCEEDED;
 }
@@ -65,12 +88,41 @@ void OnDeinit(const int reason)
 
 void OnTick(void)
 {
+    if (trailStop)
+        TrailStop(pos, trade, EA_MAGIC, tslTriggerPoints, tslPoints);
+
     if (!newBar())
         return;
 
     IsPivotHigh();
     IsPivotLow();
 
+    if (!TradeSession(startTime, endTime))
+        return;
+
+    if (OrdersTotal() != 0 || PositionsTotal() != 0)
+        return;
+    
+    if (BuyLimitCondition())
+    {
+        double sl = 0;
+
+        double pl = (pivots[1].type == PIVOT_LOW ? pivots[1].value : 0);
+        double ph = (pivots[0].type == PIVOT_HIGH ? pivots[0].value : 0);
+
+        if (ph == 0 || pl == 0)
+            return;
+        
+        double std = MathAbs(ph - pl);
+        double support = ph - 0.62 * std;
+        double resistance1 = ph + .5 * std;
+        double resistance2 = ph + std;
+        
+        double entry = support;
+        sl = pivots[1].value;
+        BuyLimit(entry, sl, resistance1);
+        BuyLimit(entry, sl, resistance2);
+    }
 }
 
 
@@ -124,3 +176,30 @@ bool IsPivotLow()
     return false;
 }
 
+bool BuyLimitCondition()
+{
+    datetime prevDay = iTime(Symbol(), PERIOD_D1, 1);
+    double prevDailyHigh = iHigh(_Symbol, PERIOD_D1, 1);
+    double prevDailyLow = iLow(_Symbol, PERIOD_D1, 1);
+
+    bool pivotHigh = (pivots[0].type == PIVOT_HIGH && pivots[0].value > prevDailyHigh);
+    bool pivotLow = (pivots[1].type == PIVOT_LOW && pivots[1].value < prevDailyHigh);
+
+    if (pivotHigh && pivotLow)
+        return true;
+    return false;
+}
+
+void BuyLimit(double entry, double slPrice, double tpPrice)
+{
+    double ask = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
+    // if (ask > entry + orderDistPoints * Point())   return;  // Don't send order if entry is less than orderDistPoints away.
+
+    double lots = 0.01;
+    double slDiff = MathAbs(entry - slPrice);
+
+    if (riskPercent > 0)    lots = calculateLots(slDiff, riskPercent);
+    datetime expiration = iTime(_Symbol, PERIOD_CURRENT, 0) + expBars * PeriodSeconds(PERIOD_CURRENT);
+
+    trade.BuyLimit(lots, entry, _Symbol, slPrice, tpPrice, ORDER_TIME_SPECIFIED, expiration, tradeComment);
+}
