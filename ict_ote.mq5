@@ -56,6 +56,7 @@ int historySize = 50;
 
 
 // ----------- Data -----------
+int lenRates = 99;
 MqlRates rates[];
 
 
@@ -74,7 +75,9 @@ int OnInit()
     }
 
     ArraySetAsSeries(pivots, true);
+    ArraySetAsSeries(rates, true);
     ArrayResize(pivots, historySize);
+    ArrayResize(rates, lenRates);
 
     trade.SetExpertMagicNumber(EA_MAGIC);
 
@@ -93,6 +96,8 @@ void OnTick(void)
 
     if (!newBar())
         return;
+    
+    CopyRates(_Symbol, PERIOD_CURRENT, 1, lenRates, rates);
 
     IsPivotHigh();
     IsPivotLow();
@@ -103,7 +108,7 @@ void OnTick(void)
     if (OrdersTotal() != 0 || PositionsTotal() != 0)
         return;
     
-    if (BuyLimitCondition())
+    if (BuyLimitCondition(rates))
     {
         double sl = 0;
 
@@ -121,7 +126,7 @@ void OnTick(void)
         double entry = support;
         sl = pivots[1].value;
         BuyLimit(entry, sl, resistance1);
-        BuyLimit(entry, sl, resistance2);
+        // BuyLimit(entry, sl, resistance2);
     }
 }
 
@@ -145,7 +150,8 @@ bool IsPivotHigh()
         Pivot p = {ph, now, PIVOT_HIGH};
         if (pivots[0].type == PIVOT_HIGH)
         {
-            pivots[0] = p.copy();            
+            if (p.value > pivots[0].value)
+                pivots[0] = p.copy();            
         }
         else
         {
@@ -165,7 +171,8 @@ bool IsPivotLow()
         Pivot p = {pl, time, PIVOT_LOW};
         if (pivots[0].type == PIVOT_LOW)
         {
-            pivots[0] = p.copy();
+            if (p.value < pivots[0].value)
+                pivots[0] = p.copy();
         }
         else
         {
@@ -176,7 +183,7 @@ bool IsPivotLow()
     return false;
 }
 
-bool BuyLimitCondition()
+bool BuyLimitCondition(MqlRates &candles[])
 {
     datetime prevDay = iTime(Symbol(), PERIOD_D1, 1);
     double prevDailyHigh = iHigh(_Symbol, PERIOD_D1, 1);
@@ -185,8 +192,11 @@ bool BuyLimitCondition()
     bool pivotHigh = (pivots[0].type == PIVOT_HIGH && pivots[0].value > prevDailyHigh);
     bool pivotLow = (pivots[1].type == PIVOT_LOW && pivots[1].value < prevDailyHigh);
 
+    // bool priceInRange = true;
     if (pivotHigh && pivotLow)
+    {
         return true;
+    }
     return false;
 }
 
