@@ -10,6 +10,7 @@
 // ----------- Inputs ----------
 input group "Pivot High/Low";
 input int pivotLen = 7; // Bars to look around for Pivots
+input int historySize = 50;
 
 input group "Trade Management";
 input ulong EA_MAGIC = 59205709;    // Magic ID for EA
@@ -31,29 +32,11 @@ Time endTime = {endHour, endMinute, 0};
 
 
 // ------------ Global ----------
-enum ENUM_PIVOT_TYPE
-{
-    PIVOT_HIGH = 1,
-    PIVOT_LOW = -1,
-    PIVOT_NULL = 0
-};
 
-struct Pivot
-{
-    double value;
-    datetime time;
-    ENUM_PIVOT_TYPE type;
-    Pivot copy()
-    {
-        Pivot element = {value, time, type};
-        return element;
-    }
-};
 
 Pivot pivots[];
-int historySize = 50;
 
-
+PivotFinder pf;
 
 // ----------- Data -----------
 int lenRates = 99;
@@ -73,7 +56,7 @@ int OnInit()
         Alert("Current Timeframe should be M5");
         return INIT_FAILED;
     }
-
+    pf = new PivotFinder(historySize, PERIOD_CURRENT, _Symbol, pivotLen);
     ArraySetAsSeries(pivots, true);
     ArraySetAsSeries(rates, true);
     ArrayResize(pivots, historySize);
@@ -97,6 +80,8 @@ void OnTick(void)
     if (!newBar())
         return;
     
+    pf.Update();
+
     CopyRates(_Symbol, PERIOD_CURRENT, 1, lenRates, rates);
 
     IsPivotHigh();

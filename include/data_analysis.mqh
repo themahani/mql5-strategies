@@ -1,8 +1,9 @@
+
 /*
 All the data analysis utilities in one place.
 */
 
-enum ENUM_FVG_TYPE 
+enum ENUM_FVG_TYPE
 {
     FVG_BULLISH = 1,
     FVG_BEARISH = -1,
@@ -17,7 +18,8 @@ struct FVG
     double low;
     datetime time;
     ENUM_FVG_TYPE type;
-    FVG copy()
+    FVG
+    copy()
     {
         FVG copied;
         copied.top = top;
@@ -35,7 +37,8 @@ struct Box
     datetime startTime;
     datetime endTime;
     string name;
-    Box copy()
+    Box
+    copy()
     {
         Box copied;
         copied.startTime = startTime;
@@ -48,9 +51,9 @@ struct Box
 void updateSeriesBox(Box &arr[], Box &newValue)
 {
     int size = ArraySize(arr);
-    for (int i = size-2; i >=0; i--)
+    for (int i = size - 2; i >= 0; i--)
     {
-        arr[i+1] = arr[i];
+        arr[i + 1] = arr[i];
     }
     arr[0] = newValue;
 }
@@ -75,13 +78,12 @@ so we use that for our new value and shift the previous data to the left.
 void updateSeriesFVG(FVG &arr[], FVG &newValue)
 {
     int size = ArraySize(arr);
-    for (int i = size-2; i >=0; i--)
+    for (int i = size - 2; i >= 0; i--)
     {
-        arr[i+1] = arr[i];
+        arr[i + 1] = arr[i];
     }
     arr[0] = newValue;
 }
-
 
 void initializeArrayFVG(FVG &arr[], int len)
 {
@@ -105,7 +107,6 @@ bool isBullish(MqlRates &candle)
     }
     return false;
 }
-
 
 bool bigCandle(MqlRates &candle, double b2wRatio)
 {
@@ -166,7 +167,8 @@ bool bearishFVG(MqlRates &candles[], FVG &fvg, double fvg2bRatio, double b2wRati
 Box DrawBox(FVG &fvg, int nBars)
 {
     double clr = clrGreen;
-    if (fvg.type == FVG_BEARISH)    clr = clrRed;
+    if (fvg.type == FVG_BEARISH)
+        clr = clrRed;
 
     datetime time1 = fvg.time;
     datetime time2 = time1 + nBars * PeriodSeconds(Period());
@@ -174,7 +176,7 @@ Box DrawBox(FVG &fvg, int nBars)
     Box newBox = {time1, time2, name};
 
     // Create the rectangle object
-    if(!ObjectCreate(0, name, OBJ_RECTANGLE, 0, time1, fvg.bottom, time2, fvg.top))
+    if (!ObjectCreate(0, name, OBJ_RECTANGLE, 0, time1, fvg.bottom, time2, fvg.top))
     {
         Print("Error creating rectangle: ", GetLastError());
         newBox.name = NULL;
@@ -182,20 +184,21 @@ Box DrawBox(FVG &fvg, int nBars)
     }
 
     // Set the rectangle properties
-    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);           // Outline color
-    ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);         // Outline style
-    ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);                   // Outline width
-    ObjectSetInteger(0, name, OBJPROP_BACK, true);                 // Draw in the background
+    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);         // Outline color
+    ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID); // Outline style
+    ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);           // Outline width
+    ObjectSetInteger(0, name, OBJPROP_BACK, true);         // Draw in the background
 
     // Set the fill color and transparency (clrGreen with transparency)
-    ObjectSetInteger(0, name, OBJPROP_FILL, true);                 // Enable filling
-    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);            // Color of the box outline
-    ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);         // Solid style for border
-    ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);                   // Border width
+    ObjectSetInteger(0, name, OBJPROP_FILL, true);         // Enable filling
+    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);         // Color of the box outline
+    ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID); // Solid style for border
+    ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);           // Border width
     return newBox;
 }
 
-double PivotHigh(int loopBack)
+double
+PivotHigh(int loopBack)
 {
     double highest = 0;
     int count = 2 * loopBack + 1;
@@ -205,7 +208,8 @@ double PivotHigh(int loopBack)
     return highest;
 }
 
-double PivotLow(int loopBack)
+double
+PivotLow(int loopBack)
 {
     double lowest = 0;
     int count = 2 * loopBack + 1;
@@ -214,3 +218,105 @@ double PivotLow(int loopBack)
         lowest = iLow(NULL, 0, highestIndex);
     return lowest;
 }
+
+enum ENUM_PIVOT_TYPE
+{
+    PIVOT_HIGH = 1,
+    PIVOT_LOW = -1,
+    PIVOT_NULL = 0
+};
+
+struct Pivot
+{
+    double value;
+    datetime time;
+    ENUM_PIVOT_TYPE type;
+    Pivot
+    copy()
+    {
+        Pivot element = {value, time, type};
+        return element;
+    }
+};
+
+template <typename VOID>
+void UpdateSeries(VOID &array[], const VOID &newElement)
+{
+    int size = ArraySize(array);
+    for (int i = size - 2; i >= 0; i--)
+    {
+        array[i + 1] = array[i];
+    }
+    array[0] = newElement;
+}
+
+class PivotFinder
+{
+protected:
+    int historySize;
+    Pivot pivots[];
+    int window;
+    ENUM_TIMEFRAMES timeframe;
+    string symbol;
+
+public:
+    PivotFinder(int histSize, ENUM_TIMEFRAMES tf, string symb,
+                int loopback = 1) : historySize(histSize),
+                                    timeframe(tf),
+                                    symbol(symb),
+                                    window(loopback)
+    {
+        ArrayResize(pivots, historySize);
+        ArraySetAsSeries(pivots, true);
+    }
+    ~PivotFinder()
+    {
+    }
+
+    void Update()
+    {
+        datetime now = iTime(symbol, timeframe, window + 1);
+
+        double pl = PivotLow(window);
+        if (pl != 0)
+        {
+            if (pivots[0].type == PIVOT_LOW && pl < pivots[0].value)
+            {
+                Pivot pivotLow = {pl, now, PIVOT_LOW};
+                UpdateSeries(pivots, pivotLow.copy());
+            }
+            else if (pivots[0].type == PIVOT_HIGH)
+            {
+                Pivot pivotLow = {pl, now, PIVOT_LOW};
+                UpdateSeries(pivots, pivotLow.copy());
+            }
+        }
+
+        double ph = PivotHigh(window);
+        if (ph != 0)
+        {
+            if (pivots[0].type == PIVOT_HIGH && pl > pivots[0].value)
+            {
+                Pivot pivotHigh = {ph, now, PIVOT_HIGH};
+                UpdateSeries(pivots, pivotHigh.copy());
+            }
+            else if (pivots[0].type == PIVOT_LOW)
+            {
+                Pivot pivotHigh = {ph, now, PIVOT_HIGH};
+                UpdateSeries(pivots, pivotHigh.copy());
+            }
+        }
+    }
+
+    Pivot getPivot(int index = 0)
+    {
+        if (index > historySize - 1)
+        {
+            SetUserError(ERR_BUFFERS_WRONG_INDEX);
+            Print("ERROR: Index out of bounds for series\n", _LastError);
+            Pivot nullPivot = {0, 0, PIVOT_NULL};
+            return nullPivot;
+        }
+        return pivots[index];
+    }
+};
