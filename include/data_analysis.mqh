@@ -1,3 +1,8 @@
+//+------------------------------------------------------------------+
+//|                                                      ProjectName |
+//|                                      Copyright 2020, CompanyName |
+//|                                       http://www.companyname.net |
+//+------------------------------------------------------------------+
 
 /*
 All the data analysis utilities in one place.
@@ -18,8 +23,7 @@ struct FVG
     double low;
     datetime time;
     ENUM_FVG_TYPE type;
-    FVG
-    copy()
+    FVG copy()
     {
         FVG copied;
         copied.top = top;
@@ -37,8 +41,7 @@ struct Box
     datetime startTime;
     datetime endTime;
     string name;
-    Box
-    copy()
+    Box copy()
     {
         Box copied;
         copied.startTime = startTime;
@@ -48,6 +51,9 @@ struct Box
     }
 };
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 void updateSeriesBox(Box &arr[], Box &newValue)
 {
     int size = ArraySize(arr);
@@ -58,6 +64,9 @@ void updateSeriesBox(Box &arr[], Box &newValue)
     arr[0] = newValue;
 }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 void initializeArrayBox(Box &arr[], int len)
 {
     for (int i = 0; i < len; i++)
@@ -85,6 +94,9 @@ void updateSeriesFVG(FVG &arr[], FVG &newValue)
     arr[0] = newValue;
 }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 void initializeArrayFVG(FVG &arr[], int len)
 {
     for (int i = 0; i < len; i++)
@@ -108,6 +120,9 @@ bool isBullish(MqlRates &candle)
     return false;
 }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool bigCandle(MqlRates &candle, double b2wRatio)
 {
     double wick = MathAbs(candle.high - candle.low);
@@ -143,6 +158,9 @@ bool bullishFVG(MqlRates &candles[], FVG &fvg, double fvg2bRatio, double b2wRati
     return false;
 }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 bool bearishFVG(MqlRates &candles[], FVG &fvg, double fvg2bRatio, double b2wRatio)
 {
     double top = candles[2].low;
@@ -197,25 +215,29 @@ Box DrawBox(FVG &fvg, int nBars)
     return newBox;
 }
 
-double
-PivotHigh(int loopBack)
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double PivotHigh(int loopBack, ENUM_TIMEFRAMES tf)
 {
     double highest = 0;
     int count = 2 * loopBack + 1;
-    int highestIndex = iHighest(NULL, 0, MODE_HIGH, count, 0);
+    int highestIndex = iHighest(NULL, tf, MODE_HIGH, count, 0);
     if (highestIndex == (loopBack + 1))
-        highest = iHigh(NULL, 0, highestIndex);
+        highest = iHigh(NULL, tf, highestIndex);
     return highest;
 }
 
-double
-PivotLow(int loopBack)
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double PivotLow(int loopBack, ENUM_TIMEFRAMES tf)
 {
     double lowest = 0;
     int count = 2 * loopBack + 1;
-    int highestIndex = iLowest(NULL, 0, MODE_LOW, count, 0);
+    int highestIndex = iLowest(NULL, tf, MODE_LOW, count, 0);
     if (highestIndex == (loopBack + 1))
-        lowest = iLow(NULL, 0, highestIndex);
+        lowest = iLow(NULL, tf, highestIndex);
     return lowest;
 }
 
@@ -231,8 +253,7 @@ struct Pivot
     double value;
     datetime time;
     ENUM_PIVOT_TYPE type;
-    Pivot
-    copy()
+    Pivot copy()
     {
         Pivot element = {value, time, type};
         return element;
@@ -250,6 +271,9 @@ void UpdateSeries(VOID &array[], const VOID &newElement)
     array[0] = newElement;
 }
 
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
 class PivotFinder
 {
 protected:
@@ -277,7 +301,7 @@ public:
     {
         datetime now = iTime(symbol, timeframe, window + 1);
 
-        double pl = PivotLow(window);
+        double pl = PivotLow(window, timeframe);
         if (pl != 0)
         {
             if (pivots[0].type == PIVOT_LOW && pl < pivots[0].value)
@@ -292,7 +316,7 @@ public:
             }
         }
 
-        double ph = PivotHigh(window);
+        double ph = PivotHigh(window, timeframe);
         if (ph != 0)
         {
             if (pivots[0].type == PIVOT_HIGH && pl > pivots[0].value)
@@ -320,3 +344,4 @@ public:
         return pivots[index];
     }
 };
+//+------------------------------------------------------------------+
